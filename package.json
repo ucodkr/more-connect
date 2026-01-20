@@ -1,0 +1,170 @@
+{
+  "name": "more-connect",
+  "displayName": "More Connect",
+  "description": "Database client for MySQL/MariaDB/PostgreSQL inside VS Code.",
+  "version": "0.1.0",
+  "publisher": "ucodkr",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:moreConnect.addConnection",
+    "onCommand:moreConnect.runQuery",
+    "onView:moreConnectConnections"
+  ],
+  "main": "./dist/extension.js",
+  "icon": "media/database.svg",
+  "contributes": {
+    "commands": [
+      {
+        "command": "moreConnect.addConnection",
+        "title": "More Connect: Add Connection"
+      },
+      {
+        "command": "moreConnect.editConnection",
+        "title": "More Connect: Edit Connection"
+      },
+      {
+        "command": "moreConnect.removeConnection",
+        "title": "More Connect: Remove Connection"
+      },
+      {
+        "command": "moreConnect.setActiveConnection",
+        "title": "More Connect: Set Active Connection"
+      },
+      {
+        "command": "moreConnect.connect",
+        "title": "More Connect: Connect"
+      },
+      {
+        "command": "moreConnect.disconnect",
+        "title": "More Connect: Disconnect"
+      },
+      {
+        "command": "moreConnect.refreshSchema",
+        "title": "More Connect: Refresh Schema"
+      },
+      {
+        "command": "moreConnect.previewTable",
+        "title": "More Connect: Preview Table"
+      },
+      {
+        "command": "moreConnect.runQuery",
+        "title": "More Connect: Run Query"
+      },
+      {
+        "command": "moreConnect.runQueryFromEditor",
+        "title": "More Connect: Run Query (Selection/Current Line)"
+      },
+      {
+        "command": "moreConnect.refreshConnections",
+        "title": "More Connect: Refresh Connections"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "moreConnectContainer",
+          "title": "More Connect",
+          "icon": "media/database.svg"
+        }
+      ]
+    },
+    "views": {
+      "moreConnectContainer": [
+        {
+          "id": "moreConnectConnections",
+          "name": "Connections"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "moreConnect.addConnection",
+          "when": "view == moreConnectConnections",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.refreshConnections",
+          "when": "view == moreConnectConnections",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "moreConnect.connect",
+          "when": "view == moreConnectConnections && viewItem == connection",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.disconnect",
+          "when": "view == moreConnectConnections && viewItem == connectionConnected",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.setActiveConnection",
+          "when": "view == moreConnectConnections && (viewItem == connection || viewItem == connectionConnected)",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.runQuery",
+          "when": "view == moreConnectConnections && viewItem == connectionConnected",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.refreshSchema",
+          "when": "view == moreConnectConnections && (viewItem == connection || viewItem == connectionConnected)",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.editConnection",
+          "when": "view == moreConnectConnections && (viewItem == connection || viewItem == connectionConnected)",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.removeConnection",
+          "when": "view == moreConnectConnections && viewItem == connection",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.previewTable",
+          "when": "view == moreConnectConnections && viewItem == table",
+          "group": "inline"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "moreConnect.runQueryFromEditor",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "moreConnect.runQuery",
+          "when": "editorTextFocus"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "node ./scripts/esbuild.mjs",
+    "dev": "node ./scripts/esbuild.mjs --watch",
+    "watch": "node ./scripts/esbuild.mjs --watch",
+    "vsc:pac": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/pg": "^8.11.10",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.20.2",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "mysql2": "^3.11.0",
+    "pg": "^8.12.0"
+  }
+}
