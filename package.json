@@ -16,52 +16,63 @@
     "onView:moreConnectConnections"
   ],
   "main": "./dist/extension.js",
-  "icon": "media/database.svg",
+  "icon": "media/extension-icon.svg.png",
   "contributes": {
     "commands": [
       {
         "command": "moreConnect.addConnection",
-        "title": "More Connect: Add Connection"
+        "title": "More Connect: Add Connection",
+        "icon": "$(add)"
       },
       {
         "command": "moreConnect.editConnection",
-        "title": "More Connect: Edit Connection"
+        "title": "More Connect: Edit Connection",
+        "icon": "$(edit)"
       },
       {
         "command": "moreConnect.removeConnection",
-        "title": "More Connect: Remove Connection"
+        "title": "More Connect: Remove Connection",
+        "icon": "$(trash)"
       },
       {
         "command": "moreConnect.setActiveConnection",
-        "title": "More Connect: Set Active Connection"
+        "title": "More Connect: Set Active Connection",
+        "icon": "$(star)"
       },
       {
         "command": "moreConnect.connect",
-        "title": "More Connect: Connect"
+        "title": "More Connect: Connect",
+        "icon": "$(plug)"
       },
       {
         "command": "moreConnect.disconnect",
-        "title": "More Connect: Disconnect"
+        "title": "More Connect: Disconnect",
+        "icon": "$(debug-disconnect)"
       },
       {
         "command": "moreConnect.refreshSchema",
-        "title": "More Connect: Refresh Schema"
+        "title": "More Connect: Refresh Schema",
+        "icon": "$(sync)"
       },
       {
         "command": "moreConnect.previewTable",
-        "title": "More Connect: Preview Table"
+        "title": "More Connect: Preview Table",
+        "icon": "$(table)"
       },
       {
         "command": "moreConnect.runQuery",
-        "title": "More Connect: Run Query"
+        "title": "More Connect: Run Query",
+        "icon": "$(play)"
       },
       {
         "command": "moreConnect.runQueryFromEditor",
-        "title": "More Connect: Run Query (Selection/Current Line)"
+        "title": "More Connect: Run Query (Selection/Current Line)",
+        "icon": "$(run)"
       },
       {
         "command": "moreConnect.refreshConnections",
-        "title": "More Connect: Refresh Connections"
+        "title": "More Connect: Refresh Connections",
+        "icon": "$(refresh)"
       }
     ],
     "viewsContainers": {
