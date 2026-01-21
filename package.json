@@ -2,12 +2,16 @@
   "name": "more-connect",
   "displayName": "More Connect",
   "description": "Database client for MySQL/MariaDB/PostgreSQL inside VS Code.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "ucodkr",
   "engines": {
     "vscode": "^1.85.0"
   },
-  "keywords": ["mysql" , "database","mariadb"],
+  "keywords": [
+    "mysql",
+    "database",
+    "mariadb"
+  ],
   "scripts": {
     "vscode:prepublish": "npm run build",
     "build": "node ./scripts/esbuild.mjs",
@@ -15,7 +19,6 @@
     "watch": "node ./scripts/esbuild.mjs --watch",
     "vsc:pac": "vsce package",
     "vsc:pub": "npm version patch -m \"release %s\" && vsce package && vsce publish"
-
   },
   "repository": "https://gitlab.com/ucodkr/tools/more-connect.git",
   "categories": [
@@ -170,7 +173,6 @@
       ]
     }
   },
-  
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/pg": "^8.11.10",
