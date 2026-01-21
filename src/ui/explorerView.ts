@@ -1,7 +1,11 @@
 import * as vscode from "vscode";
-import type { ConnectionConfig } from "../types";
+import type { ConnectionConfig, SshConnection } from "../types";
 
 export type ExplorerNode =
+  | {
+      kind: "group";
+      group: "db" | "ssh";
+    }
   | {
       kind: "connection";
       config: ConnectionConfig;
@@ -20,10 +24,15 @@ export type ExplorerNode =
       table: string;
       schema?: string;
       tableType?: string;
+    }
+  | {
+      kind: "ssh";
+      conn: SshConnection;
     };
 
 export type ExplorerDataSource = {
   listConnections(): ConnectionConfig[];
+  listSshConnections(): SshConnection[];
   isConnected(id: string): boolean;
   getActiveConnectionId(): string | undefined;
   listDatabases(connection: ConnectionConfig): Promise<string[]>;
@@ -45,6 +54,13 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
 
   public getTreeItem(element: ExplorerNode): vscode.TreeItem {
     switch (element.kind) {
+      case "group": {
+        const label = element.group === "db" ? "DB Connections" : "SSH Connections";
+        const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Expanded);
+        item.contextValue = element.group === "db" ? "dbGroup" : "sshGroup";
+        item.iconPath = new vscode.ThemeIcon(element.group === "db" ? "database" : "terminal");
+        return item;
+      }
       case "connection": {
         const label = element.config.name + (element.active ? " (active)" : "");
         const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Collapsed);
@@ -75,6 +91,19 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
         item.contextValue = "table";
         item.description = element.tableType ?? "";
         item.iconPath = new vscode.ThemeIcon("table");
+        item.command = {
+          command: "moreConnect.previewTable",
+          title: "Preview Table",
+          arguments: [element]
+        };
+        return item;
+      }
+      case "ssh": {
+        const item = new vscode.TreeItem(element.conn.name, vscode.TreeItemCollapsibleState.None);
+        item.contextValue = "sshConnection";
+        item.description = element.conn.hostName ?? "";
+        item.tooltip = element.conn.target;
+        item.iconPath = new vscode.ThemeIcon("terminal");
         return item;
       }
     }
@@ -82,6 +111,13 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
 
   public async getChildren(element?: ExplorerNode): Promise<ExplorerNode[]> {
     if (!element) {
+      return [
+        { kind: "group", group: "db" },
+        { kind: "group", group: "ssh" }
+      ];
+    }
+
+    if (element.kind === "group" && element.group === "db") {
       const activeId = this.source.getActiveConnectionId();
       return this.source.listConnections().map((config) => ({
         kind: "connection",
@@ -89,6 +125,10 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
         connected: this.source.isConnected(config.id),
         active: activeId === config.id
       }));
+    }
+
+    if (element.kind === "group" && element.group === "ssh") {
+      return this.source.listSshConnections().map((conn) => ({ kind: "ssh", conn }));
     }
 
     if (element.kind === "connection") {

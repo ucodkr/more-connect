@@ -94,6 +94,36 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "moreConnect.refreshSsh",
+        "title": "More Connect: Refresh SSH",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "moreConnect.openSshTerminal",
+        "title": "More Connect: Open SSH Terminal",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "moreConnect.importSshConfig",
+        "title": "More Connect: Import ~/.ssh/config",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "moreConnect.addSshConnection",
+        "title": "More Connect: Add SSH Connection",
+        "icon": "$(add)"
+      },
+      {
+        "command": "moreConnect.editSshConnection",
+        "title": "More Connect: Edit SSH Connection",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "moreConnect.removeSshConnection",
+        "title": "More Connect: Remove SSH Connection",
+        "icon": "$(trash)"
+      },
+      {
         "command": "moreConnect.runSqlFile",
         "title": "More Connect: Run .sql File (Active Connection)",
         "icon": "$(play)"
@@ -179,12 +209,28 @@
           "group": "navigation"
         },
         {
+          "command": "moreConnect.addSshConnection",
+          "when": "view == moreConnectConnections",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.importSshConfig",
+          "when": "view == moreConnectConnections",
+          "group": "navigation"
+        },
+        {
           "command": "moreConnect.setConnectionsStorageFolder",
           "when": "view == moreConnectConnections",
           "group": "navigation"
         },
         {
           "command": "moreConnect.refreshConnections",
+          "when": "view == moreConnectConnections",
+          "group": "navigation"
+        }
+        ,
+        {
+          "command": "moreConnect.refreshSsh",
           "when": "view == moreConnectConnections",
           "group": "navigation"
         }
@@ -238,6 +284,22 @@
         {
           "command": "moreConnect.duplicateConnection",
           "when": "view == moreConnectConnections && (viewItem == connection || viewItem == connectionConnected)",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.openSshTerminal",
+          "when": "view == moreConnectConnections && viewItem == sshConnection",
+          "group": "inline",
+          "title": "Connect"
+        },
+        {
+          "command": "moreConnect.editSshConnection",
+          "when": "view == moreConnectConnections && viewItem == sshConnection",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.removeSshConnection",
+          "when": "view == moreConnectConnections && viewItem == sshConnection",
           "group": "navigation"
         },
         {

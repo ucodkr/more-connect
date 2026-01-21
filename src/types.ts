@@ -22,6 +22,18 @@ export type ConnectionConfig = {
   sshRemotePort?: number;
 };
 
+export type SshConnection = {
+  id: string;
+  name: string;
+  /** Preferred SSH target (usually Host alias from ~/.ssh/config). */
+  target: string;
+  /** Optional metadata used for display/editing. */
+  hostName?: string;
+  user?: string;
+  port?: number;
+  identityFile?: string;
+};
+
 export type QueryResult = {
   columns: string[];
   rows: Array<Record<string, unknown>>;

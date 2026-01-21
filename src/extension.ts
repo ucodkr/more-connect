@@ -11,6 +11,8 @@ import { ConnectionWizard } from "./ui/connectionWizard";
 import { ExplorerView, type ExplorerNode } from "./ui/explorerView";
 import { TunnelManager } from "./ssh/tunnelManager";
 import { RedisClient } from "./db/redisClient";
+import { SshStore } from "./ssh/sshStore";
+import { parseSshConfig, readUserSshConfigText, sshConnectionsFromConfig } from "./ssh/sshConfig";
 
 const SECRET_PREFIX = "moreConnect.password.";
 const SSH_SECRET_PREFIX = "moreConnect.sshPassword.";
@@ -34,6 +36,8 @@ type SqlFileContext = {
 export async function activate(context: vscode.ExtensionContext) {
   const store = new ConnectionStore(context);
   await store.init(context.globalState);
+  const sshStore = new SshStore(context);
+  await sshStore.init();
   const output = vscode.window.createOutputChannel("More Connect");
   logStoragePaths(output, context, store);
   const resultsPanel = new ResultsPanel(context);
@@ -100,6 +104,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   const view = new ExplorerView({
     listConnections: () => store.list(),
+    listSshConnections: () => sshStore.list(),
     isConnected: (id) => {
       for (const [key, client] of clientsByKey.entries()) {
         if (key.startsWith(`${id}::`) && client.isConnected) return true;
@@ -856,6 +861,7 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
 
   context.subscriptions.push(
     vscode.commands.registerCommand("moreConnect.refreshConnections", () => view.refresh()),
+    vscode.commands.registerCommand("moreConnect.refreshSsh", () => view.refresh()),
 
     vscode.commands.registerCommand("moreConnect.showStoragePaths", async () => {
       const drivers = vscode.Uri.joinPath(context.globalStorageUri, "drivers");
@@ -888,9 +894,100 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
       });
       if (!pick?.[0]) return;
       await store.setFolderUri(pick[0]);
+      await sshStore.setFolderUri(pick[0]);
       vscode.window.showInformationMessage(
         `Connection storage: ${vscode.Uri.joinPath(pick[0], "more-connect-connections.json").fsPath}`
       );
+      view.refresh();
+    }),
+
+    vscode.commands.registerCommand("moreConnect.openSshTerminal", async (node?: ExplorerNode) => {
+      const conn = node?.kind === "ssh" ? node.conn : undefined;
+      if (!conn) return;
+      const term = vscode.window.createTerminal({
+        name: `SSH: ${conn.name}`,
+        // Open the terminal in the editor area (본문창) instead of the panel.
+        location: { viewColumn: vscode.ViewColumn.Active }
+      });
+      term.show(false);
+      term.sendText(`ssh ${conn.target}`, true);
+    }),
+
+    vscode.commands.registerCommand("moreConnect.importSshConfig", async () => {
+      const text = await readUserSshConfigText();
+      if (!text.trim()) {
+        vscode.window.showInformationMessage("No ~/.ssh/config found (or empty).");
+        return;
+      }
+      const imported = sshConnectionsFromConfig(parseSshConfig(text));
+      if (imported.length === 0) {
+        vscode.window.showInformationMessage("No concrete Host entries found in ~/.ssh/config.");
+        return;
+      }
+
+      const existing = sshStore.list();
+      const existingTargets = new Set(existing.map((c) => c.target));
+      const next = [...existing];
+      let added = 0;
+      for (const c of imported) {
+        if (existingTargets.has(c.target)) continue;
+        // Convert deterministic id to persisted unique id.
+        next.push({ ...c, id: randomUUID() });
+        added++;
+      }
+      await sshStore.saveAll(next);
+      view.refresh();
+      vscode.window.showInformationMessage(`Imported SSH hosts: +${added}`);
+    }),
+
+    vscode.commands.registerCommand("moreConnect.addSshConnection", async () => {
+      const target = await vscode.window.showInputBox({
+        title: "Add SSH connection",
+        prompt: "Enter SSH target (e.g. my-alias, user@host, host -p 2222)",
+        ignoreFocusOut: true
+      });
+      if (!target?.trim()) return;
+      const name = await vscode.window.showInputBox({
+        title: "Connection name",
+        prompt: "Display name in the SSH view",
+        value: target.trim(),
+        ignoreFocusOut: true
+      });
+      if (!name?.trim()) return;
+      const next = [...sshStore.list(), { id: randomUUID(), name: name.trim(), target: target.trim() }];
+      await sshStore.saveAll(next);
+      view.refresh();
+    }),
+
+    vscode.commands.registerCommand("moreConnect.editSshConnection", async (node?: ExplorerNode) => {
+      const conn = node?.kind === "ssh" ? node.conn : undefined;
+      if (!conn) return;
+
+      const target = await vscode.window.showInputBox({
+        title: `Edit SSH connection: ${conn.name}`,
+        prompt: "SSH target (e.g. my-alias, user@host, host -p 2222)",
+        value: conn.target,
+        ignoreFocusOut: true
+      });
+      if (target === undefined) return;
+
+      const name = await vscode.window.showInputBox({
+        title: `Edit SSH connection: ${conn.name}`,
+        prompt: "Display name in the SSH view",
+        value: conn.name,
+        ignoreFocusOut: true
+      });
+      if (name === undefined) return;
+
+      const updated = { ...conn, name: name.trim() || conn.name, target: target.trim() || conn.target };
+      await sshStore.saveAll(sshStore.list().map((c) => (c.id === conn.id ? updated : c)));
+      view.refresh();
+    }),
+
+    vscode.commands.registerCommand("moreConnect.removeSshConnection", async (node?: ExplorerNode) => {
+      const conn = node?.kind === "ssh" ? node.conn : undefined;
+      if (!conn) return;
+      await sshStore.saveAll(sshStore.list().filter((c) => c.id !== conn.id));
       view.refresh();
     }),
 
