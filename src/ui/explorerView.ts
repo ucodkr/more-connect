@@ -72,11 +72,6 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
         item.iconPath = element.connected
           ? new vscode.ThemeIcon("plug", new vscode.ThemeColor("charts.green"))
           : new vscode.ThemeIcon("circle-outline");
-        item.command = {
-          command: "moreConnect.setActiveConnection",
-          title: "Set Active Connection",
-          arguments: [element]
-        };
         return item;
       }
       case "database": {

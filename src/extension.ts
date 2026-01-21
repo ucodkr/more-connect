@@ -126,7 +126,81 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   });
 
-  const treeView = vscode.window.createTreeView("moreConnectConnections", { treeDataProvider: view });
+  const DND_MIME = "application/vnd.more-connect.connection";
+  const dragAndDropController: vscode.TreeDragAndDropController<ExplorerNode> = {
+    dragMimeTypes: [DND_MIME],
+    dropMimeTypes: [DND_MIME],
+    handleDrag: async (source, dataTransfer) => {
+      const items = source
+        .map((n) => {
+          if (n.kind === "connection") return { kind: "db", id: n.config.id };
+          if (n.kind === "ssh") return { kind: "ssh", id: n.conn.id };
+          return;
+        })
+        .filter(Boolean);
+      if (items.length === 0) return;
+      dataTransfer.set(DND_MIME, new vscode.DataTransferItem(JSON.stringify(items)));
+    },
+    handleDrop: async (target, dataTransfer) => {
+      const raw = dataTransfer.get(DND_MIME)?.value;
+      if (typeof raw !== "string") return;
+      let dragged: Array<{ kind: "db" | "ssh"; id: string }> = [];
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) dragged = parsed;
+      } catch {
+        return;
+      }
+      if (dragged.length === 0) return;
+
+      const dragKind = dragged[0].kind;
+      if (!dragged.every((d) => d.kind === dragKind)) return;
+
+      const targetKind =
+        target?.kind === "group"
+          ? target.group
+          : target?.kind === "connection"
+            ? "db"
+            : target?.kind === "ssh"
+              ? "ssh"
+              : undefined;
+      if (!targetKind || targetKind !== dragKind) return;
+
+      const insertBeforeId =
+        dragKind === "db"
+          ? target?.kind === "connection"
+            ? target.config.id
+            : undefined
+          : target?.kind === "ssh"
+            ? target.conn.id
+            : undefined;
+
+      if (dragKind === "db") {
+        const all = store.list();
+        const draggedIds = new Set(dragged.map((d) => d.id));
+        const remaining = all.filter((c) => !draggedIds.has(c.id));
+        const moved = all.filter((c) => draggedIds.has(c.id));
+        const idx = insertBeforeId ? remaining.findIndex((c) => c.id === insertBeforeId) : -1;
+        const next = idx >= 0 ? [...remaining.slice(0, idx), ...moved, ...remaining.slice(idx)] : [...remaining, ...moved];
+        await store.saveAll(next);
+      } else {
+        const all = sshStore.list();
+        const draggedIds = new Set(dragged.map((d) => d.id));
+        const remaining = all.filter((c) => !draggedIds.has(c.id));
+        const moved = all.filter((c) => draggedIds.has(c.id));
+        const idx = insertBeforeId ? remaining.findIndex((c) => c.id === insertBeforeId) : -1;
+        const next = idx >= 0 ? [...remaining.slice(0, idx), ...moved, ...remaining.slice(idx)] : [...remaining, ...moved];
+        await sshStore.saveAll(next);
+      }
+
+      view.refresh();
+    }
+  };
+
+  const treeView = vscode.window.createTreeView("moreConnectConnections", {
+    treeDataProvider: view,
+    dragAndDropController
+  });
   context.subscriptions.push(treeView, output);
 
   async function getOrCreateClient(config: ConnectionConfig, databaseOverride?: string): Promise<DbClient> {
@@ -861,7 +935,6 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
 
   context.subscriptions.push(
     vscode.commands.registerCommand("moreConnect.refreshConnections", () => view.refresh()),
-    vscode.commands.registerCommand("moreConnect.refreshSsh", () => view.refresh()),
 
     vscode.commands.registerCommand("moreConnect.showStoragePaths", async () => {
       const drivers = vscode.Uri.joinPath(context.globalStorageUri, "drivers");
