@@ -44,6 +44,11 @@
         "icon": "$(edit)"
       },
       {
+        "command": "moreConnect.duplicateConnection",
+        "title": "More Connect: Duplicate Connection",
+        "icon": "$(copy)"
+      },
+      {
         "command": "moreConnect.removeConnection",
         "title": "More Connect: Remove Connection",
         "icon": "$(trash)"
@@ -227,6 +232,11 @@
         },
         {
           "command": "moreConnect.editConnection",
+          "when": "view == moreConnectConnections && (viewItem == connection || viewItem == connectionConnected)",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.duplicateConnection",
           "when": "view == moreConnectConnections && (viewItem == connection || viewItem == connectionConnected)",
           "group": "navigation"
         },

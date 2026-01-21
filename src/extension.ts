@@ -10,6 +10,7 @@ import { InfoPanel } from "./ui/infoPanel";
 import { ConnectionWizard } from "./ui/connectionWizard";
 import { ExplorerView, type ExplorerNode } from "./ui/explorerView";
 import { TunnelManager } from "./ssh/tunnelManager";
+import { RedisClient } from "./db/redisClient";
 
 const SECRET_PREFIX = "moreConnect.password.";
 const SSH_SECRET_PREFIX = "moreConnect.sshPassword.";
@@ -440,7 +441,9 @@ export async function activate(context: vscode.ExtensionContext) {
     if (!isSql) return;
 
     const selection = editor.selection;
-    const sql = selection.isEmpty ? doc.lineAt(selection.active.line).text : doc.getText(selection);
+    const sql = selection.isEmpty
+      ? sqlStatementAtCursor(doc, selection.active) || doc.lineAt(selection.active.line).text
+      : doc.getText(selection);
     if (!sql.trim()) return;
 
     const fileCtx = !doc.isUntitled ? getSqlFileContext(doc.uri) : undefined;
@@ -739,44 +742,103 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
     }
     if (!client.isConnected) return;
 
-    const typeRes = await client.query(`TYPE ${escapeRedisArg(key)}`);
-    const type = String((typeRes.rows?.[0] as any)?.value ?? "").trim().toLowerCase();
+    const trimmedKey = String(key ?? "");
+    if (!trimmedKey) throw new Error("Redis key is empty");
 
-    const ttlRes = await client.query(`TTL ${escapeRedisArg(key)}`);
-    const ttl = String((ttlRes.rows?.[0] as any)?.value ?? "");
-
+    let type = "";
+    let ttl = "";
     let result: QueryResult | undefined;
-    if (type === "string") {
-      result = await client.query(`GET ${escapeRedisArg(key)}`);
-    } else if (type === "hash") {
-      const raw = await client.query(`HGETALL ${escapeRedisArg(key)}`);
-      const parsed = safeJsonParseArray((raw.rows?.[0] as any)?.value);
-      const rows: Array<Record<string, unknown>> = [];
-      for (let i = 0; i < parsed.length; i += 2) rows.push({ field: parsed[i], value: parsed[i + 1] });
-      result = { columns: ["field", "value"], rows, rowCount: rows.length, durationMs: raw.durationMs };
-    } else if (type === "list") {
-      const raw = await client.query(`LRANGE ${escapeRedisArg(key)} 0 200`);
-      const parsed = safeJsonParseArray((raw.rows?.[0] as any)?.value);
-      const rows = parsed.map((v, i) => ({ index: i, value: v }));
-      result = { columns: ["index", "value"], rows, rowCount: rows.length, durationMs: raw.durationMs };
-    } else if (type === "set") {
-      const raw = await client.query(`SSCAN ${escapeRedisArg(key)} 0 COUNT 200`);
-      const parsed = safeJsonParseArray((raw.rows?.[0] as any)?.value);
-      const members = Array.isArray(parsed?.[1]) ? parsed[1] : [];
-      const rows = members.map((v) => ({ member: v }));
-      result = { columns: ["member"], rows, rowCount: rows.length, durationMs: raw.durationMs };
-    } else if (type === "zset") {
-      const raw = await client.query(`ZRANGE ${escapeRedisArg(key)} 0 200 WITHSCORES`);
-      const parsed = safeJsonParseArray((raw.rows?.[0] as any)?.value);
-      const rows: Array<Record<string, unknown>> = [];
-      for (let i = 0; i < parsed.length; i += 2) rows.push({ member: parsed[i], score: parsed[i + 1] });
-      result = { columns: ["member", "score"], rows, rowCount: rows.length, durationMs: raw.durationMs };
-    } else if (type === "stream") {
-      result = await client.query(`XRANGE ${escapeRedisArg(key)} - + COUNT 50`);
-    } else if (type === "none" || !type) {
-      result = { columns: ["message"], rows: [{ message: "Key not found" }], rowCount: 1, durationMs: 0 };
+
+    // Prefer argv-based commands for Redis previews to avoid parsing edge cases.
+    if (client instanceof RedisClient) {
+      type = String(await client.sendCommand(["TYPE", trimmedKey])).trim().toLowerCase();
+      ttl = String(await client.sendCommand(["TTL", trimmedKey]));
+
+      const start = Date.now();
+      if (type === "string") {
+        const value = await client.sendCommand(["GET", trimmedKey]);
+        result = {
+          columns: ["value"],
+          rows: [{ value }],
+          rowCount: 1,
+          durationMs: Date.now() - start
+        };
+      } else if (type === "hash") {
+        const value = (await client.sendCommand(["HGETALL", trimmedKey])) as any;
+        const rows: Array<Record<string, unknown>> = [];
+        if (Array.isArray(value)) {
+          for (let i = 0; i < value.length; i += 2) rows.push({ field: value[i], value: value[i + 1] });
+        }
+        result = { columns: ["field", "value"], rows, rowCount: rows.length, durationMs: Date.now() - start };
+      } else if (type === "list") {
+        const value = (await client.sendCommand(["LRANGE", trimmedKey, "0", "200"])) as any;
+        const list = Array.isArray(value) ? value : [];
+        const rows = list.map((v, i) => ({ index: i, value: v }));
+        result = { columns: ["index", "value"], rows, rowCount: rows.length, durationMs: Date.now() - start };
+      } else if (type === "set") {
+        const value = (await client.sendCommand(["SSCAN", trimmedKey, "0", "COUNT", "200"])) as any;
+        const members = Array.isArray(value?.[1]) ? value[1] : [];
+        const rows = members.map((v: any) => ({ member: v }));
+        result = { columns: ["member"], rows, rowCount: rows.length, durationMs: Date.now() - start };
+      } else if (type === "zset") {
+        const value = (await client.sendCommand(["ZRANGE", trimmedKey, "0", "200", "WITHSCORES"])) as any;
+        const rows: Array<Record<string, unknown>> = [];
+        if (Array.isArray(value)) {
+          for (let i = 0; i < value.length; i += 2) rows.push({ member: value[i], score: value[i + 1] });
+        }
+        result = { columns: ["member", "score"], rows, rowCount: rows.length, durationMs: Date.now() - start };
+      } else if (type === "stream") {
+        const value = await client.sendCommand(["XRANGE", trimmedKey, "-", "+", "COUNT", "50"]);
+        result = {
+          columns: ["value"],
+          rows: [{ value: stringifyValue(value) }],
+          rowCount: 1,
+          durationMs: Date.now() - start
+        };
+      } else if (type === "none" || !type) {
+        result = { columns: ["message"], rows: [{ message: "Key not found" }], rowCount: 1, durationMs: 0 };
+      } else {
+        result = { columns: ["message"], rows: [{ message: `Unsupported type: ${type}` }], rowCount: 1, durationMs: 0 };
+      }
     } else {
-      result = { columns: ["message"], rows: [{ message: `Unsupported type: ${type}` }], rowCount: 1, durationMs: 0 };
+      const typeRes = await client.query(`TYPE ${escapeRedisArg(trimmedKey)}`);
+      type = String((typeRes.rows?.[0] as any)?.value ?? "").trim().toLowerCase();
+
+      const ttlRes = await client.query(`TTL ${escapeRedisArg(trimmedKey)}`);
+      ttl = String((ttlRes.rows?.[0] as any)?.value ?? "");
+
+      if (type === "string") {
+        result = await client.query(`GET ${escapeRedisArg(trimmedKey)}`);
+      } else if (type === "hash") {
+        const raw = await client.query(`HGETALL ${escapeRedisArg(trimmedKey)}`);
+        const parsed = safeJsonParseArray((raw.rows?.[0] as any)?.value);
+        const rows: Array<Record<string, unknown>> = [];
+        for (let i = 0; i < parsed.length; i += 2) rows.push({ field: parsed[i], value: parsed[i + 1] });
+        result = { columns: ["field", "value"], rows, rowCount: rows.length, durationMs: raw.durationMs };
+      } else if (type === "list") {
+        const raw = await client.query(`LRANGE ${escapeRedisArg(trimmedKey)} 0 200`);
+        const parsed = safeJsonParseArray((raw.rows?.[0] as any)?.value);
+        const rows = parsed.map((v, i) => ({ index: i, value: v }));
+        result = { columns: ["index", "value"], rows, rowCount: rows.length, durationMs: raw.durationMs };
+      } else if (type === "set") {
+        const raw = await client.query(`SSCAN ${escapeRedisArg(trimmedKey)} 0 COUNT 200`);
+        const parsed = safeJsonParseArray((raw.rows?.[0] as any)?.value);
+        const members = Array.isArray(parsed?.[1]) ? parsed[1] : [];
+        const rows = members.map((v) => ({ member: v }));
+        result = { columns: ["member"], rows, rowCount: rows.length, durationMs: raw.durationMs };
+      } else if (type === "zset") {
+        const raw = await client.query(`ZRANGE ${escapeRedisArg(trimmedKey)} 0 200 WITHSCORES`);
+        const parsed = safeJsonParseArray((raw.rows?.[0] as any)?.value);
+        const rows: Array<Record<string, unknown>> = [];
+        for (let i = 0; i < parsed.length; i += 2) rows.push({ member: parsed[i], score: parsed[i + 1] });
+        result = { columns: ["member", "score"], rows, rowCount: rows.length, durationMs: raw.durationMs };
+      } else if (type === "stream") {
+        result = await client.query(`XRANGE ${escapeRedisArg(trimmedKey)} - + COUNT 50`);
+      } else if (type === "none" || !type) {
+        result = { columns: ["message"], rows: [{ message: "Key not found" }], rowCount: 1, durationMs: 0 };
+      } else {
+        result = { columns: ["message"], rows: [{ message: `Unsupported type: ${type}` }], rowCount: 1, durationMs: 0 };
+      }
     }
 
     const metaRow = { key, type, ttl };
@@ -889,6 +951,30 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
       view.refresh();
     }),
 
+    vscode.commands.registerCommand("moreConnect.duplicateConnection", async (node?: ExplorerNode) => {
+      const config = node && node.kind === "connection" ? node.config : pickConnectedOrAnyConnection();
+      if (!config) return;
+
+      const all = store.list();
+      const baseName = `${config.name} (copy)`;
+      let nextName = baseName;
+      for (let i = 2; all.some((c) => c.name === nextName); i++) {
+        nextName = `${baseName} ${i}`;
+      }
+
+      const nextId = randomUUID();
+      const cloned: ConnectionConfig = { ...config, id: nextId, name: nextName };
+      await store.saveAll([...all, cloned]);
+
+      const existingPassword = await context.secrets.get(`${SECRET_PREFIX}${config.id}`);
+      if (existingPassword) await context.secrets.store(`${SECRET_PREFIX}${cloned.id}`, existingPassword);
+      const existingSshPassword = await context.secrets.get(`${SSH_SECRET_PREFIX}${config.id}`);
+      if (existingSshPassword) await context.secrets.store(`${SSH_SECRET_PREFIX}${cloned.id}`, existingSshPassword);
+
+      view.refresh();
+      vscode.window.showInformationMessage(`Connection duplicated: ${cloned.name}`);
+    }),
+
     vscode.commands.registerCommand("moreConnect.removeConnection", async (node?: ExplorerNode) => {
       const config = node && node.kind === "connection" ? node.config : undefined;
       if (!config) return;
@@ -990,7 +1076,8 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
       if (!editor) return;
       const selection = editor.selection;
       const sql = selection.isEmpty
-        ? editor.document.lineAt(selection.active.line).text
+        ? sqlStatementAtCursor(editor.document, selection.active) ||
+          editor.document.lineAt(selection.active.line).text
         : editor.document.getText(selection);
 
       const config = pickConnectedOrAnyConnection();
@@ -1035,6 +1122,9 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
 export async function deactivate() {}
 
 function logStoragePaths(output: vscode.OutputChannel, context: vscode.ExtensionContext, store: ConnectionStore): void {
+  // Avoid noisy logs on activation; keep this for troubleshooting only.
+  // Enable by launching VS Code Extension Host with env `MORE_CONNECT_DEBUG=1`.
+  if (process.env.MORE_CONNECT_DEBUG !== "1") return;
   const drivers = vscode.Uri.joinPath(context.globalStorageUri, "drivers");
   const connectionsFolder = store.getFolderUri();
   const lines = [
@@ -1044,9 +1134,6 @@ function logStoragePaths(output: vscode.OutputChannel, context: vscode.Extension
     `[storage] connectionsFile=${connectionsFolder ? vscode.Uri.joinPath(connectionsFolder, "more-connect-connections.json").fsPath : "(n/a)"}`
   ];
   for (const l of lines) output.appendLine(l);
-  // Also print to Extension Host debug console
-  // eslint-disable-next-line no-console
-  console.log(lines.join("\n"));
 }
 
 function createGlobalStorageModuleLoader(driversDirFsPath: string): OptionalModuleLoader {
@@ -1095,7 +1182,10 @@ function quoteIdentMysql(name: string): string {
 }
 
 function quoteIdentOracle(name: string): string {
-  return `"${name.replaceAll('"', '""')}"`;
+  // Defensive: strip control characters that can trigger ORA-00911 in generated SQL.
+  // Also strip common invisible separators (NBSP, ZWSP/ZWNJ/ZWJ, BOM).
+  const cleaned = name.replaceAll(/[\u0000-\u001F\u007F\u00A0\u200B-\u200D\uFEFF]/g, "").trim();
+  return `"${cleaned.replaceAll('"', '""')}"`;
 }
 
 function quoteStringPg(value: string): string {
@@ -1115,7 +1205,8 @@ function buildSelectPreviewSql(type: DbType, database: string, table: string, sc
     const owner = (schema ?? database ?? "").trim();
     const qTable = owner ? `${quoteIdentOracle(owner)}.${quoteIdentOracle(table)}` : quoteIdentOracle(table);
     // Oracle driver rejects trailing semicolons; keep it statement-only.
-    return `SELECT * FROM ${qTable} FETCH FIRST 200 ROWS ONLY`;
+    // Use ROWNUM for broad compatibility (works pre-12c too).
+    return `SELECT * FROM ${qTable} WHERE ROWNUM <= 200`;
   }
   const qDb = quoteIdentMysql(database);
   const qTable = quoteIdentMysql(table);
@@ -1138,6 +1229,31 @@ function escapeRedisArg(s: string): string {
   // Redis CLI-like escaping: quote if needed.
   if (!s.includes(" ") && !s.includes("\t") && !s.includes("\n") && !s.includes('"')) return s;
   return `"${s.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+}
+
+function stringifyValue(value: unknown): string {
+  if (value === null || value === undefined) return String(value);
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function sqlStatementAtCursor(doc: vscode.TextDocument, pos: vscode.Position): string {
+  const text = doc.getText();
+  if (!text.trim()) return "";
+  const offset = doc.offsetAt(pos);
+  const safeOffset = Math.max(0, Math.min(offset, text.length));
+
+  const before = text.lastIndexOf(";", Math.max(0, safeOffset - 1));
+  const start = before === -1 ? 0 : before + 1;
+  const after = text.indexOf(";", safeOffset);
+  const end = after === -1 ? text.length : after;
+
+  return text.slice(start, end).trim();
 }
 
 function safeJsonParseArray(value: unknown): any[] {
