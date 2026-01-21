@@ -2,7 +2,7 @@
   "name": "more-connect",
   "displayName": "More Connect",
   "description": "Database client for MySQL/MariaDB/PostgreSQL inside VS Code.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "ucodkr",
   "engines": {
     "vscode": "^1.85.0"
@@ -298,8 +298,7 @@
           "when": "editorTextFocus"
         }
       ]
-    }
-    ,
+    },
     "keybindings": [
       {
         "command": "moreConnect.runSqlFromEditor",
