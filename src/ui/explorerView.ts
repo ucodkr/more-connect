@@ -67,11 +67,6 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
         const item = new vscode.TreeItem(element.database, vscode.TreeItemCollapsibleState.Collapsed);
         item.contextValue = "database";
         item.iconPath = new vscode.ThemeIcon("database");
-        item.command = {
-          command: "moreConnect.runQuery",
-          title: "Run Query",
-          arguments: [element]
-        };
         return item;
       }
       case "table": {
@@ -80,11 +75,6 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
         item.contextValue = "table";
         item.description = element.tableType ?? "";
         item.iconPath = new vscode.ThemeIcon("table");
-        item.command = {
-          command: "moreConnect.previewTable",
-          title: "Preview Table",
-          arguments: [element]
-        };
         return item;
       }
     }

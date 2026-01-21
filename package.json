@@ -87,6 +87,56 @@
         "command": "moreConnect.refreshConnections",
         "title": "More Connect: Refresh Connections",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "moreConnect.runSqlFile",
+        "title": "More Connect: Run .sql File (Active Connection)",
+        "icon": "$(play)"
+      },
+      {
+        "command": "moreConnect.runSqlFromEditor",
+        "title": "More Connect: Run SQL (Selection/Current Line)",
+        "icon": "$(run)"
+      },
+      {
+        "command": "moreConnect.showDatabaseInfo",
+        "title": "More Connect: Database Info",
+        "icon": "$(info)"
+      },
+      {
+        "command": "moreConnect.showTableInfo",
+        "title": "More Connect: Table Info",
+        "icon": "$(info)"
+      },
+      {
+        "command": "moreConnect.newSql",
+        "title": "More Connect: New SQL",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "moreConnect.openSavedSql",
+        "title": "More Connect: Open Saved SQL",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "moreConnect.saveSqlToGlobal",
+        "title": "More Connect: Save SQL to Global Storage",
+        "icon": "$(save)"
+      },
+      {
+        "command": "moreConnect.selectConnectionForSql",
+        "title": "More Connect: Select Connection for .sql",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "moreConnect.selectDatabaseForSql",
+        "title": "More Connect: Select Database for .sql",
+        "icon": "$(database)"
+      },
+      {
+        "command": "moreConnect.generateTableDdl",
+        "title": "More Connect: Generate Table DDL",
+        "icon": "$(symbol-structure)"
       }
     ],
     "viewsContainers": {
@@ -120,6 +170,21 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "moreConnect.newSql",
+          "when": "view == moreConnectConnections && (viewItem == connection || viewItem == connectionConnected || viewItem == database || viewItem == table)",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.openSavedSql",
+          "when": "view == moreConnectConnections && (viewItem == connection || viewItem == connectionConnected || viewItem == database || viewItem == table)",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.showDatabaseInfo",
+          "when": "view == moreConnectConnections && viewItem == database",
+          "group": "inline"
+        },
         {
           "command": "moreConnect.connect",
           "when": "view == moreConnectConnections && viewItem == connection",
@@ -159,6 +224,38 @@
           "command": "moreConnect.previewTable",
           "when": "view == moreConnectConnections && viewItem == table",
           "group": "inline"
+        },
+        {
+          "command": "moreConnect.showTableInfo",
+          "when": "view == moreConnectConnections && viewItem == table",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.generateTableDdl",
+          "when": "view == moreConnectConnections && viewItem == table",
+          "group": "navigation"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "moreConnect.selectConnectionForSql",
+          "when": "resourceLangId == sql",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.selectDatabaseForSql",
+          "when": "resourceLangId == sql",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.runSqlFile",
+          "when": "resourceLangId == sql",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.saveSqlToGlobal",
+          "when": "resourceLangId == sql",
+          "group": "navigation"
         }
       ],
       "commandPalette": [
@@ -172,6 +269,14 @@
         }
       ]
     }
+    ,
+    "keybindings": [
+      {
+        "command": "moreConnect.runSqlFromEditor",
+        "key": "cmd+enter",
+        "when": "editorTextFocus && resourceLangId == sql"
+      }
+    ]
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
