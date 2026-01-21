@@ -11,7 +11,15 @@ export type ConnectionConfig = {
   ssl?: boolean;
   sqliteFilePath?: string;
   oracleConnectString?: string;
+  oraclePrivilege?: "default" | "sysdba" | "sysoper";
   redisDatabase?: number;
+  sshEnabled?: boolean;
+  sshHost?: string;
+  sshPort?: number;
+  sshUser?: string;
+  sshPrivateKeyPath?: string;
+  sshRemoteHost?: string;
+  sshRemotePort?: number;
 };
 
 export type QueryResult = {

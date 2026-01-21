@@ -9,8 +9,10 @@ import { ResultsPanel } from "./ui/resultsPanel";
 import { InfoPanel } from "./ui/infoPanel";
 import { ConnectionWizard } from "./ui/connectionWizard";
 import { ExplorerView, type ExplorerNode } from "./ui/explorerView";
+import { TunnelManager } from "./ssh/tunnelManager";
 
 const SECRET_PREFIX = "moreConnect.password.";
+const SSH_SECRET_PREFIX = "moreConnect.sshPassword.";
 const ACTIVE_CONNECTION_KEY = "moreConnect.activeConnectionId";
 const SAVED_SQL_KEY = "moreConnect.savedSql.v1";
 const SQL_FILE_CONTEXT_KEY = "moreConnect.sqlFileContext.v1";
@@ -29,8 +31,10 @@ type SqlFileContext = {
 };
 
 export async function activate(context: vscode.ExtensionContext) {
-  const store = new ConnectionStore(context.globalState);
+  const store = new ConnectionStore(context);
+  await store.init(context.globalState);
   const output = vscode.window.createOutputChannel("More Connect");
+  logStoragePaths(output, context, store);
   const resultsPanel = new ResultsPanel(context);
   const infoPanel = new InfoPanel(context);
   const connectionWizard = new ConnectionWizard(context);
@@ -42,6 +46,12 @@ export async function activate(context: vscode.ExtensionContext) {
   const clientsByKey = new Map<string, DbClient>();
   const driverDir = vscode.Uri.joinPath(context.globalStorageUri, "drivers");
   const moduleLoader: OptionalModuleLoader = createGlobalStorageModuleLoader(driverDir.fsPath);
+  const tunnels = new TunnelManager(moduleLoader);
+
+  // Ensure global storage folders exist (VS Code creates them lazily otherwise).
+  try {
+    await vscode.workspace.fs.createDirectory(driverDir);
+  } catch {}
 
   function getActiveConnectionId(): string | undefined {
     return context.globalState.get<string>(ACTIVE_CONNECTION_KEY);
@@ -125,18 +135,69 @@ export async function activate(context: vscode.ExtensionContext) {
   async function promptConnectionConfig(existing?: ConnectionConfig): Promise<{
     config: ConnectionConfig;
     password?: string;
+    sshPassword?: string;
     resetPassword?: boolean;
   } | undefined> {
     const res = await connectionWizard.open(existing);
     if (res.kind !== "save") return;
-    return { config: res.config, password: res.password, resetPassword: res.resetPassword };
+    return {
+      config: res.config,
+      password: res.password,
+      sshPassword: res.sshPassword,
+      resetPassword: res.resetPassword
+    };
+  }
+
+  async function promptConnectionConfigFromPayload(payload: any): Promise<{
+    config: ConnectionConfig;
+    password?: string;
+    sshPassword?: string;
+  } | undefined> {
+    // Reuse wizard parser by round-tripping through ConnectionWizard.open is overkill; payload already mirrors it.
+    // Keep validation minimal here; ConnectionWizard will show field-level errors for Save, but Test can be direct.
+    const type = String(payload?.type ?? "");
+    const name = String(payload?.name ?? "").trim() || `${type}-test`;
+    const baseId = String(payload?.id ?? "") || randomUUID();
+    const config: ConnectionConfig = {
+      id: baseId,
+      name,
+      type: type as any,
+      host: String(payload?.host ?? "").trim(),
+      port: Number(payload?.port ?? 0),
+      user: String(payload?.user ?? "").trim(),
+      database: String(payload?.database ?? "").trim() || undefined,
+      ssl: Boolean(payload?.ssl),
+      sqliteFilePath: String(payload?.sqliteFilePath ?? "").trim() || undefined,
+      oracleConnectString: String(payload?.oracleConnectString ?? "").trim() || undefined,
+      oraclePrivilege:
+        String(payload?.oraclePrivilege ?? "").trim() === "sysdba"
+          ? "sysdba"
+          : String(payload?.oraclePrivilege ?? "").trim() === "sysoper"
+            ? "sysoper"
+            : "default",
+      redisDatabase: payload?.redisDatabase !== undefined && String(payload.redisDatabase).trim() !== "" ? Number(payload.redisDatabase) : undefined,
+      sshEnabled: Boolean(payload?.sshEnabled),
+      sshHost: String(payload?.sshHost ?? "").trim() || undefined,
+      sshPort: payload?.sshPort !== undefined && String(payload.sshPort).trim() !== "" ? Number(payload.sshPort) : undefined,
+      sshUser: String(payload?.sshUser ?? "").trim() || undefined,
+      sshPrivateKeyPath: String(payload?.sshPrivateKeyPath ?? "").trim() || undefined,
+      sshRemoteHost: String(payload?.sshRemoteHost ?? "").trim() || undefined,
+      sshRemotePort: payload?.sshRemotePort !== undefined && String(payload.sshRemotePort).trim() !== "" ? Number(payload.sshRemotePort) : undefined
+    };
+    const password = String(payload?.password ?? "");
+    const sshPassword = String(payload?.sshPassword ?? "");
+    return { config, password: password || undefined, sshPassword: sshPassword || undefined };
   }
 
   async function ensurePassword(config: ConnectionConfig): Promise<string | undefined> {
-    if (config.type === "sqlite") return "";
+    if (config.type === "sqlite" || config.type === "redis") return "";
     const key = `${SECRET_PREFIX}${config.id}`;
     const existing = await context.secrets.get(key);
-    if (existing) return existing;
+    if (existing !== undefined) {
+      // eslint-disable-next-line no-console
+      console.log("[more-connect] using saved db password", { id: config.id });
+      return existing;
+    }
 
     const password = await vscode.window.showInputBox({
       title: `Password for ${config.name}`,
@@ -144,11 +205,56 @@ export async function activate(context: vscode.ExtensionContext) {
       ignoreFocusOut: true
     });
     if (password === undefined) return;
+    if (password.trim().length === 0) {
+      vscode.window.showInformationMessage("Password is required.");
+      return;
+    }
     await context.secrets.store(key, password);
+    // eslint-disable-next-line no-console
+    console.log("[more-connect] stored db password", { id: config.id });
+    return password;
+  }
+
+  async function ensureSshPassword(config: ConnectionConfig): Promise<string | undefined> {
+    if (!config.sshEnabled) return;
+    const key = `${SSH_SECRET_PREFIX}${config.id}`;
+    const existing = await context.secrets.get(key);
+    if (existing !== undefined) {
+      // eslint-disable-next-line no-console
+      console.log("[more-connect] using saved ssh password", { id: config.id });
+      return existing;
+    }
+    const password = await vscode.window.showInputBox({
+      title: `SSH Password for ${config.name} (optional)`,
+      password: true,
+      ignoreFocusOut: true
+    });
+    if (password === undefined) return;
+    if (password.trim().length === 0) return "";
+    await context.secrets.store(key, password);
+    // eslint-disable-next-line no-console
+    console.log("[more-connect] stored ssh password", { id: config.id });
     return password;
   }
 
   async function connect(config: ConnectionConfig): Promise<void> {
+    if (config.sshEnabled) {
+      const sshPw = await ensureSshPassword(config);
+      if (sshPw === undefined) return;
+      try {
+        const forwarded = await tunnels.ensureTunnel(config, sshPw);
+        if (forwarded) {
+          config = { ...config, host: forwarded.host, port: forwarded.port };
+        }
+      } catch (e) {
+        const err = e as Error;
+        if (err.message?.startsWith("Missing driver:")) {
+          await showMissingDriverHelp(context, driverDir.fsPath, err.message);
+          return;
+        }
+        throw e;
+      }
+    }
     const client = await getOrCreateClient(config);
     if (client.isConnected) return;
     const password = await ensurePassword(config);
@@ -166,12 +272,63 @@ export async function activate(context: vscode.ExtensionContext) {
     view.refresh();
   }
 
+  async function testConnection(
+    config: ConnectionConfig,
+    password: string | undefined,
+    sshPassword: string | undefined
+  ): Promise<void> {
+    let effective = config;
+    if (effective.sshEnabled) {
+      try {
+        const forwarded = await tunnels.ensureTunnel(effective, sshPassword);
+        if (forwarded) effective = { ...effective, host: forwarded.host, port: forwarded.port };
+      } catch (e) {
+        const err = e as Error;
+        if (err.message?.startsWith("Missing driver:")) {
+          await showMissingDriverHelp(context, driverDir.fsPath, err.message);
+          return;
+        }
+        throw e;
+      }
+    }
+
+    const client = await getOrCreateClient(effective);
+    if (client.isConnected) {
+      vscode.window.showInformationMessage("Connection OK (already connected).");
+      return;
+    }
+
+    const pw = effective.type === "sqlite" ? "" : password ?? "";
+    try {
+      await client.connect(pw);
+      // lightweight sanity query
+      if (effective.type === "postgres") await client.query("SELECT 1;");
+      else if (effective.type === "mysql" || effective.type === "mariadb") await client.query("SELECT 1;");
+      else if (effective.type === "sqlite") await client.query("SELECT 1;");
+      else if (effective.type === "oracle") await client.query("SELECT 1 FROM DUAL");
+      else if (effective.type === "redis") await client.query("PING");
+      vscode.window.showInformationMessage("Connection OK.");
+    } catch (e) {
+      const err = e as Error;
+      if (err.message?.startsWith("Missing driver:")) {
+        await showMissingDriverHelp(context, driverDir.fsPath, err.message);
+        return;
+      }
+      vscode.window.showErrorMessage(`Connection failed: ${err.message}`);
+    } finally {
+      try {
+        await client.disconnect();
+      } catch {}
+    }
+  }
+
   async function disconnect(config: ConnectionConfig): Promise<void> {
     for (const [key, client] of clientsByKey.entries()) {
       if (key.startsWith(`${config.id}::`) && client.isConnected) {
         await client.disconnect();
       }
     }
+    await tunnels.closeTunnel(config.id);
     view.refresh();
   }
 
@@ -575,18 +732,131 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
     }
   }
 
+  async function previewRedisKey(config: ConnectionConfig, key: string): Promise<void> {
+    const client = await getOrCreateClient(config);
+    if (!client.isConnected) {
+      await connect(config);
+    }
+    if (!client.isConnected) return;
+
+    const typeRes = await client.query(`TYPE ${escapeRedisArg(key)}`);
+    const type = String((typeRes.rows?.[0] as any)?.value ?? "").trim().toLowerCase();
+
+    const ttlRes = await client.query(`TTL ${escapeRedisArg(key)}`);
+    const ttl = String((ttlRes.rows?.[0] as any)?.value ?? "");
+
+    let result: QueryResult | undefined;
+    if (type === "string") {
+      result = await client.query(`GET ${escapeRedisArg(key)}`);
+    } else if (type === "hash") {
+      const raw = await client.query(`HGETALL ${escapeRedisArg(key)}`);
+      const parsed = safeJsonParseArray((raw.rows?.[0] as any)?.value);
+      const rows: Array<Record<string, unknown>> = [];
+      for (let i = 0; i < parsed.length; i += 2) rows.push({ field: parsed[i], value: parsed[i + 1] });
+      result = { columns: ["field", "value"], rows, rowCount: rows.length, durationMs: raw.durationMs };
+    } else if (type === "list") {
+      const raw = await client.query(`LRANGE ${escapeRedisArg(key)} 0 200`);
+      const parsed = safeJsonParseArray((raw.rows?.[0] as any)?.value);
+      const rows = parsed.map((v, i) => ({ index: i, value: v }));
+      result = { columns: ["index", "value"], rows, rowCount: rows.length, durationMs: raw.durationMs };
+    } else if (type === "set") {
+      const raw = await client.query(`SSCAN ${escapeRedisArg(key)} 0 COUNT 200`);
+      const parsed = safeJsonParseArray((raw.rows?.[0] as any)?.value);
+      const members = Array.isArray(parsed?.[1]) ? parsed[1] : [];
+      const rows = members.map((v) => ({ member: v }));
+      result = { columns: ["member"], rows, rowCount: rows.length, durationMs: raw.durationMs };
+    } else if (type === "zset") {
+      const raw = await client.query(`ZRANGE ${escapeRedisArg(key)} 0 200 WITHSCORES`);
+      const parsed = safeJsonParseArray((raw.rows?.[0] as any)?.value);
+      const rows: Array<Record<string, unknown>> = [];
+      for (let i = 0; i < parsed.length; i += 2) rows.push({ member: parsed[i], score: parsed[i + 1] });
+      result = { columns: ["member", "score"], rows, rowCount: rows.length, durationMs: raw.durationMs };
+    } else if (type === "stream") {
+      result = await client.query(`XRANGE ${escapeRedisArg(key)} - + COUNT 50`);
+    } else if (type === "none" || !type) {
+      result = { columns: ["message"], rows: [{ message: "Key not found" }], rowCount: 1, durationMs: 0 };
+    } else {
+      result = { columns: ["message"], rows: [{ message: `Unsupported type: ${type}` }], rowCount: 1, durationMs: 0 };
+    }
+
+    const metaRow = { key, type, ttl };
+    const metaResult: QueryResult = {
+      columns: ["key", "type", "ttl"],
+      rows: [metaRow],
+      rowCount: 1,
+      durationMs: 0
+    };
+
+    resultsPanel.show(config, `-- Redis key preview\n-- DB=${config.database ?? "0"}\n-- ${key}`, metaResult);
+    // Show actual data in same panel by immediately overwriting with the data result
+    resultsPanel.show(config, `-- Redis key: ${key}\n-- type=${type}, ttl=${ttl}\n`, result);
+  }
+
   context.subscriptions.push(
     vscode.commands.registerCommand("moreConnect.refreshConnections", () => view.refresh()),
+
+    vscode.commands.registerCommand("moreConnect.showStoragePaths", async () => {
+      const drivers = vscode.Uri.joinPath(context.globalStorageUri, "drivers");
+      const info = [
+        `globalStorageUri: ${context.globalStorageUri.fsPath}`,
+        `driversDir: ${drivers.fsPath}`,
+        `connectionsFolderUri(setting): ${store.getFolderUri()?.fsPath ?? "(not set; using VS Code globalState)"}`,
+        `connectionsFile(if set): ${
+          store.getFolderUri()
+            ? vscode.Uri.joinPath(store.getFolderUri()!, "more-connect-connections.json").fsPath
+            : "(n/a)"
+        }`
+      ].join("\n");
+
+      const choice = await vscode.window.showInformationMessage(info, "Copy", "Open globalStorage");
+      if (choice === "Copy") {
+        await vscode.env.clipboard.writeText(info);
+      } else if (choice === "Open globalStorage") {
+        await vscode.commands.executeCommand("revealFileInOS", context.globalStorageUri);
+      }
+    }),
+
+    vscode.commands.registerCommand("moreConnect.setConnectionsStorageFolder", async () => {
+      const pick = await vscode.window.showOpenDialog({
+        title: "Select folder to store connection info",
+        canSelectFiles: false,
+        canSelectFolders: true,
+        canSelectMany: false,
+        openLabel: "Use this folder"
+      });
+      if (!pick?.[0]) return;
+      await store.setFolderUri(pick[0]);
+      vscode.window.showInformationMessage(
+        `Connection storage: ${vscode.Uri.joinPath(pick[0], "more-connect-connections.json").fsPath}`
+      );
+      view.refresh();
+    }),
 
     vscode.commands.registerCommand("moreConnect.addConnection", async () => {
       const created = await promptConnectionConfig();
       if (!created) return;
-      const { config, password } = created;
+      const { config, password, sshPassword } = created;
       const all = store.list();
       await store.saveAll([...all, config]);
       if (!getActiveConnectionId()) await setActiveConnectionId(config.id);
-      if (password !== undefined) await context.secrets.store(`${SECRET_PREFIX}${config.id}`, password);
+      if (password !== undefined && password.trim().length > 0) {
+        await context.secrets.store(`${SECRET_PREFIX}${config.id}`, password);
+        // eslint-disable-next-line no-console
+        console.log("[more-connect] stored db password (wizard)", { id: config.id });
+      }
+      if (sshPassword !== undefined && sshPassword !== "")
+        await context.secrets.store(`${SSH_SECRET_PREFIX}${config.id}`, sshPassword);
       view.refresh();
+    }),
+
+    vscode.commands.registerCommand("moreConnect.testConnectionFromWizard", async (payload: any) => {
+      try {
+        const { config, password, sshPassword } = (await promptConnectionConfigFromPayload(payload)) ?? {};
+        if (!config) return;
+        await testConnection(config, password, sshPassword);
+      } catch (e) {
+        vscode.window.showErrorMessage(`Test failed: ${(e as Error).message}`);
+      }
     }),
 
     vscode.commands.registerCommand("moreConnect.editConnection", async (node?: ExplorerNode) => {
@@ -594,16 +864,28 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
       if (!config) return;
       const edited = await promptConnectionConfig(config);
       if (!edited) return;
-      const { config: updated, password, resetPassword } = edited;
+      const { config: updated, password, sshPassword, resetPassword } = edited;
       await disconnect(config);
 
       if (resetPassword) await context.secrets.delete(`${SECRET_PREFIX}${updated.id}`);
-      if (password !== undefined && password !== "") {
+      if (password !== undefined && password.trim().length > 0) {
         await context.secrets.store(`${SECRET_PREFIX}${updated.id}`, password);
+      }
+      if (resetPassword) await context.secrets.delete(`${SSH_SECRET_PREFIX}${updated.id}`);
+      if (sshPassword !== undefined && sshPassword !== "") {
+        await context.secrets.store(`${SSH_SECRET_PREFIX}${updated.id}`, sshPassword);
       }
 
       const all = store.list().map((c) => (c.id === updated.id ? updated : c));
       await store.saveAll(all);
+      // eslint-disable-next-line no-console
+      console.log("[more-connect] saved edited connection", {
+        id: updated.id,
+        storageFolder: store.getFolderUri()?.fsPath,
+        file: store.getFolderUri()
+          ? vscode.Uri.joinPath(store.getFolderUri()!, "more-connect-connections.json").fsPath
+          : undefined
+      });
       view.refresh();
     }),
 
@@ -613,6 +895,7 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
       await disconnect(config);
       const key = `${SECRET_PREFIX}${config.id}`;
       await context.secrets.delete(key);
+      await context.secrets.delete(`${SSH_SECRET_PREFIX}${config.id}`);
       await store.saveAll(store.list().filter((c) => c.id !== config.id));
       for (const k of clientsByKey.keys()) {
         if (k.startsWith(`${config.id}::`)) clientsByKey.delete(k);
@@ -665,6 +948,10 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
       const config = store.list().find((c) => c.id === node.connectionId);
       if (!config) return;
       try {
+        if (config.type === "redis") {
+          await previewRedisKey({ ...config, database: node.database }, node.table);
+          return;
+        }
         const sql = buildSelectPreviewSql(config.type, node.database, node.table, node.schema);
         await runQuery({ ...config, database: node.database }, sql);
       } catch (e) {
@@ -747,6 +1034,21 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
 
 export async function deactivate() {}
 
+function logStoragePaths(output: vscode.OutputChannel, context: vscode.ExtensionContext, store: ConnectionStore): void {
+  const drivers = vscode.Uri.joinPath(context.globalStorageUri, "drivers");
+  const connectionsFolder = store.getFolderUri();
+  const lines = [
+    `[storage] globalStorageUri=${context.globalStorageUri.fsPath}`,
+    `[storage] driversDir=${drivers.fsPath}`,
+    `[storage] connectionsFolderUri=${connectionsFolder?.fsPath ?? "(not set; using VS Code globalState)"}`,
+    `[storage] connectionsFile=${connectionsFolder ? vscode.Uri.joinPath(connectionsFolder, "more-connect-connections.json").fsPath : "(n/a)"}`
+  ];
+  for (const l of lines) output.appendLine(l);
+  // Also print to Extension Host debug console
+  // eslint-disable-next-line no-console
+  console.log(lines.join("\n"));
+}
+
 function createGlobalStorageModuleLoader(driversDirFsPath: string): OptionalModuleLoader {
   const base = driversDirFsPath.endsWith("/") ? driversDirFsPath : `${driversDirFsPath}/`;
   const requireFromDrivers = createRequire(`${base}package.json`);
@@ -792,6 +1094,10 @@ function quoteIdentMysql(name: string): string {
   return `\`${name.replaceAll("`", "``")}\``;
 }
 
+function quoteIdentOracle(name: string): string {
+  return `"${name.replaceAll('"', '""')}"`;
+}
+
 function quoteStringPg(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
@@ -804,6 +1110,12 @@ function buildSelectPreviewSql(type: DbType, database: string, table: string, sc
   if (type === "postgres") {
     const qTable = schema ? `${quoteIdentPg(schema)}.${quoteIdentPg(table)}` : quoteIdentPg(table);
     return `SELECT * FROM ${qTable} LIMIT 200;`;
+  }
+  if (type === "oracle") {
+    const owner = (schema ?? database ?? "").trim();
+    const qTable = owner ? `${quoteIdentOracle(owner)}.${quoteIdentOracle(table)}` : quoteIdentOracle(table);
+    // Oracle driver rejects trailing semicolons; keep it statement-only.
+    return `SELECT * FROM ${qTable} FETCH FIRST 200 ROWS ONLY`;
   }
   const qDb = quoteIdentMysql(database);
   const qTable = quoteIdentMysql(table);
@@ -820,6 +1132,23 @@ function renderTable(headers: string[], rows: string[][]): string {
 
 function escapeHtml(s: string): string {
   return s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+}
+
+function escapeRedisArg(s: string): string {
+  // Redis CLI-like escaping: quote if needed.
+  if (!s.includes(" ") && !s.includes("\t") && !s.includes("\n") && !s.includes('"')) return s;
+  return `"${s.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+}
+
+function safeJsonParseArray(value: unknown): any[] {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "string") return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 async function fetchMysqlCreateTable(client: DbClient, database: string, table: string): Promise<string> {

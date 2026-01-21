@@ -42,7 +42,7 @@ export class RedisClient implements DbClient {
     if (password) {
       await this.sendCommand(["AUTH", password]);
     }
-    const db = this.config.redisDatabase ?? (this.config.database ? Number(this.config.database) : 0);
+    const db = this.config.database ? Number(this.config.database) : this.config.redisDatabase ?? 0;
     if (typeof db === "number" && Number.isFinite(db) && db !== 0) {
       await this.sendCommand(["SELECT", String(db)]);
     }
@@ -243,4 +243,3 @@ function stringifyRedis(value: unknown): string {
     return String(value);
   }
 }
-

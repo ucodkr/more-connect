@@ -67,12 +67,12 @@ function renderHtml(connection: ConnectionConfig, sql: string, result: QueryResu
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
       :root { color-scheme: light dark; }
-      body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif; padding: 12px; }
+      body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif; padding: 12px; background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); }
       .meta { opacity: 0.8; margin-bottom: 10px; }
       pre { white-space: pre-wrap; word-break: break-word; background: rgba(127,127,127,.12); padding: 10px; border-radius: 6px; }
       table { width: 100%; border-collapse: collapse; }
       th, td { border-bottom: 1px solid rgba(127,127,127,.35); padding: 6px 8px; vertical-align: top; }
-      th { position: sticky; top: 0; background: rgba(127,127,127,.12); text-align: left; }
+      th { position: sticky; top: 0; z-index: 2; background: var(--vscode-editor-background); text-align: left; }
       td { max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
       .note { margin-top: 10px; opacity: .75; }
     </style>
@@ -92,4 +92,3 @@ function renderHtml(connection: ConnectionConfig, sql: string, result: QueryResu
 function inferColumns(rows: Array<Record<string, unknown>>): string[] {
   return rows.length ? Object.keys(rows[0] ?? {}) : [];
 }
-

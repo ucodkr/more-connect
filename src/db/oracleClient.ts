@@ -42,7 +42,12 @@ export class OracleClient implements DbClient {
     const connection: OracleConnection = await this.oracledb.getConnection({
       user: this.config.user,
       password,
-      connectString
+      connectString,
+      ...(this.config.oraclePrivilege === "sysdba"
+        ? { privilege: this.oracledb.SYSDBA }
+        : this.config.oraclePrivilege === "sysoper"
+          ? { privilege: this.oracledb.SYSOPER }
+          : {})
     });
     this.conn = connection;
   }
@@ -57,7 +62,7 @@ export class OracleClient implements DbClient {
   public async query(sql: string): Promise<QueryResult> {
     if (!this.conn) throw new Error("Not connected");
     const start = Date.now();
-    const res = await this.conn.execute(sql, [], {
+    const res = await this.conn.execute(stripTrailingSemicolon(sql), [], {
       outFormat: this.oracledb?.OUT_FORMAT_OBJECT
     });
     const durationMs = Date.now() - start;
@@ -90,4 +95,10 @@ function optionalRequire(id: string): any {
   // eslint-disable-next-line no-eval
   const req = (0, eval)("require") as (s: string) => any;
   return req(id);
+}
+
+function stripTrailingSemicolon(sql: string): string {
+  let s = sql.trim();
+  while (s.endsWith(";")) s = s.slice(0, -1).trimEnd();
+  return s;
 }

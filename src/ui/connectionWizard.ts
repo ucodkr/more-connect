@@ -4,7 +4,8 @@ import type { ConnectionConfig, DbType } from "../types";
 
 type WizardResult =
   | { kind: "cancel" }
-  | { kind: "save"; config: ConnectionConfig; password?: string; resetPassword?: boolean };
+  | { kind: "save"; config: ConnectionConfig; password?: string; sshPassword?: string; resetPassword?: boolean };
+type WizardMessage = { type: "cancel" } | { type: "save"; payload: any } | { type: "test"; payload: any };
 
 export class ConnectionWizard {
   private panel: vscode.WebviewPanel | undefined;
@@ -30,10 +31,14 @@ export class ConnectionWizard {
 
     return await new Promise<WizardResult>((resolve) => {
       const sub = panel.webview.onDidReceiveMessage(
-        (msg: any) => {
+        async (msg: WizardMessage) => {
           if (msg?.type === "cancel") {
             sub.dispose();
             resolve({ kind: "cancel" });
+            return;
+          }
+          if (msg?.type === "test") {
+            await vscode.commands.executeCommand("moreConnect.testConnectionFromWizard", msg.payload);
             return;
           }
           if (msg?.type !== "save") return;
@@ -62,6 +67,16 @@ function parseForm(existing: ConnectionConfig | undefined, payload: any): Wizard
   const id = existing?.id ?? randomUUID();
   const resetPassword = Boolean(payload?.resetPassword);
   const password = String(payload?.password ?? "");
+  const sshEnabled = Boolean(payload?.sshEnabled);
+  const sshPassword = String(payload?.sshPassword ?? "");
+  const sshHost = String(payload?.sshHost ?? "").trim() || undefined;
+  const sshPortRaw = String(payload?.sshPort ?? "").trim();
+  const sshPort = sshPortRaw ? Number(sshPortRaw) : undefined;
+  const sshUser = String(payload?.sshUser ?? "").trim() || undefined;
+  const sshPrivateKeyPath = String(payload?.sshPrivateKeyPath ?? "").trim() || undefined;
+  const sshRemoteHost = String(payload?.sshRemoteHost ?? "").trim() || undefined;
+  const sshRemotePortRaw = String(payload?.sshRemotePort ?? "").trim();
+  const sshRemotePort = sshRemotePortRaw ? Number(sshRemotePortRaw) : undefined;
 
   if (type === "sqlite") {
     const file = String(payload?.sqliteFilePath ?? "").trim();
@@ -73,9 +88,21 @@ function parseForm(existing: ConnectionConfig | undefined, payload: any): Wizard
       host: file,
       port: 0,
       user: "",
-      sqliteFilePath: file
+      sqliteFilePath: file,
+      sshEnabled,
+      sshHost,
+      sshPort,
+      sshUser,
+      sshPrivateKeyPath,
+      sshRemoteHost,
+      sshRemotePort
     };
-    return { kind: "save", config, resetPassword: resetPassword || undefined };
+    return {
+      kind: "save",
+      config,
+      sshPassword: sshPassword || undefined,
+      resetPassword: resetPassword || undefined
+    };
   }
 
   if (type === "redis") {
@@ -95,9 +122,22 @@ function parseForm(existing: ConnectionConfig | undefined, payload: any): Wizard
       user: "",
       database: redisDatabase !== undefined ? String(redisDatabase) : undefined,
       redisDatabase,
-      ssl
+      ssl,
+      sshEnabled,
+      sshHost,
+      sshPort,
+      sshUser,
+      sshPrivateKeyPath,
+      sshRemoteHost,
+      sshRemotePort
     };
-    return { kind: "save", config, password: password || undefined, resetPassword: resetPassword || undefined };
+    return {
+      kind: "save",
+      config,
+      password: password || undefined,
+      sshPassword: sshPassword || undefined,
+      resetPassword: resetPassword || undefined
+    };
   }
 
   if (type === "oracle") {
@@ -115,9 +155,28 @@ function parseForm(existing: ConnectionConfig | undefined, payload: any): Wizard
       port: Number.isFinite(port) ? port : 1521,
       user,
       database,
-      oracleConnectString: connectString
+      oracleConnectString: connectString,
+      oraclePrivilege:
+        String(payload?.oraclePrivilege ?? "").trim() === "sysdba"
+          ? "sysdba"
+          : String(payload?.oraclePrivilege ?? "").trim() === "sysoper"
+            ? "sysoper"
+            : "default",
+      sshEnabled,
+      sshHost,
+      sshPort,
+      sshUser,
+      sshPrivateKeyPath,
+      sshRemoteHost,
+      sshRemotePort
     };
-    return { kind: "save", config, password: password || undefined, resetPassword: resetPassword || undefined };
+    return {
+      kind: "save",
+      config,
+      password: password || undefined,
+      sshPassword: sshPassword || undefined,
+      resetPassword: resetPassword || undefined
+    };
   }
 
   const host = String(payload?.host ?? "").trim();
@@ -137,9 +196,22 @@ function parseForm(existing: ConnectionConfig | undefined, payload: any): Wizard
     port,
     user,
     database,
-    ssl
+    ssl,
+    sshEnabled,
+    sshHost,
+    sshPort,
+    sshUser,
+    sshPrivateKeyPath,
+    sshRemoteHost,
+    sshRemotePort
   };
-  return { kind: "save", config, password: password || undefined, resetPassword: resetPassword || undefined };
+  return {
+    kind: "save",
+    config,
+    password: password || undefined,
+    sshPassword: sshPassword || undefined,
+    resetPassword: resetPassword || undefined
+  };
 }
 
 function renderHtml(existing?: ConnectionConfig): string {
@@ -153,7 +225,15 @@ function renderHtml(existing?: ConnectionConfig): string {
     ssl: Boolean(existing?.ssl),
     sqliteFilePath: existing?.sqliteFilePath ?? "",
     oracleConnectString: existing?.oracleConnectString ?? (existing?.type === "oracle" ? existing.host : ""),
+    oraclePrivilege: existing?.oraclePrivilege ?? "default",
     redisDatabase: existing?.redisDatabase ?? (existing?.type === "redis" ? existing.database ?? "0" : "0"),
+    sshEnabled: Boolean(existing?.sshEnabled),
+    sshHost: existing?.sshHost ?? "",
+    sshPort: String(existing?.sshPort ?? 22),
+    sshUser: existing?.sshUser ?? "",
+    sshPrivateKeyPath: existing?.sshPrivateKeyPath ?? "",
+    sshRemoteHost: existing?.sshRemoteHost ?? "",
+    sshRemotePort: String(existing?.sshRemotePort ?? ""),
     isEdit: Boolean(existing)
   };
 
@@ -180,6 +260,9 @@ function renderHtml(existing?: ConnectionConfig): string {
     .error { margin-top: 10px; color: #d11; }
     .checkbox { display: flex; align-items: center; gap: 8px; }
     .checkbox input { width: auto; }
+    .divider { grid-column: 1 / -1; height: 1px; background: rgba(127,127,127,0.25); margin: 8px 0; }
+    .inline { display: flex; gap: 10px; align-items: center; }
+    .inline .grow { flex: 1; }
   </style>
 </head>
 <body>
@@ -234,6 +317,14 @@ function renderHtml(existing?: ConnectionConfig): string {
         <label for="oracleConnectString">Connect string</label>
         <input id="oracleConnectString" value="${escapeHtml(init.oracleConnectString)}" />
       </div>
+      <div class="row" id="row-oraclePrivilege">
+        <label for="oraclePrivilege">Privilege</label>
+        <select id="oraclePrivilege">
+          ${["default", "sysdba", "sysoper"]
+            .map((p) => `<option value="${p}" ${p === init.oraclePrivilege ? "selected" : ""}>${p}</option>`)
+            .join("")}
+        </select>
+      </div>
       <div class="hint">Example: host:1521/service_name (EZConnect)</div>
     </div>
 
@@ -247,7 +338,10 @@ function renderHtml(existing?: ConnectionConfig): string {
     <div id="group-password">
       <div class="row">
         <label for="password">Password</label>
-        <input id="password" type="password" value="" />
+        <div class="inline">
+          <input id="password" class="grow" type="password" value="" />
+          <label class="checkbox"><input id="showPassword" type="checkbox" /><span>Show</span></label>
+        </div>
       </div>
       <div class="row">
         <label>Reset saved password</label>
@@ -255,10 +349,53 @@ function renderHtml(existing?: ConnectionConfig): string {
       </div>
       <div class="hint">Leave password empty to keep existing saved password (edit).</div>
     </div>
+
+    <div class="divider"></div>
+
+    <div class="row" id="row-sshEnabled">
+      <label>SSH Tunnel</label>
+      <div class="checkbox"><input id="sshEnabled" type="checkbox" ${init.sshEnabled ? "checked" : ""} /><span>Enable SSH over</span></div>
+    </div>
+
+    <div id="group-ssh" class="hidden">
+      <div class="row" id="row-sshHost">
+        <label for="sshHost">SSH Host</label>
+        <input id="sshHost" value="${escapeHtml(init.sshHost)}" placeholder="bastion.example.com" />
+      </div>
+      <div class="row" id="row-sshPort">
+        <label for="sshPort">SSH Port</label>
+        <input id="sshPort" value="${escapeHtml(init.sshPort)}" />
+      </div>
+      <div class="row" id="row-sshUser">
+        <label for="sshUser">SSH User</label>
+        <input id="sshUser" value="${escapeHtml(init.sshUser)}" />
+      </div>
+      <div class="row" id="row-sshPrivateKeyPath">
+        <label for="sshPrivateKeyPath">SSH Private Key Path (optional)</label>
+        <input id="sshPrivateKeyPath" value="${escapeHtml(init.sshPrivateKeyPath)}" placeholder="~/.ssh/id_rsa" />
+      </div>
+      <div class="row" id="row-sshPassword">
+        <label for="sshPassword">SSH Password (optional)</label>
+        <div class="inline">
+          <input id="sshPassword" class="grow" type="password" value="" />
+          <label class="checkbox"><input id="showSshPassword" type="checkbox" /><span>Show</span></label>
+        </div>
+      </div>
+      <div class="row" id="row-sshRemoteHost">
+        <label for="sshRemoteHost">Remote Host (optional)</label>
+        <input id="sshRemoteHost" value="${escapeHtml(init.sshRemoteHost)}" placeholder="db.internal" />
+      </div>
+      <div class="row" id="row-sshRemotePort">
+        <label for="sshRemotePort">Remote Port (optional)</label>
+        <input id="sshRemotePort" value="${escapeHtml(init.sshRemotePort)}" placeholder="3306/5432/..." />
+      </div>
+      <div class="hint">If remote host/port are empty, it forwards to the connection's host/port.</div>
+    </div>
   </div>
 
   <div class="actions">
     <button id="save">Save</button>
+    <button id="test">Test Connection</button>
     <button id="cancel">Cancel</button>
   </div>
   <div id="error" class="error"></div>
@@ -268,6 +405,7 @@ function renderHtml(existing?: ConnectionConfig): string {
     const $ = (id) => document.getElementById(id);
     const errorEl = $("error");
     let lastType = $("type").value;
+    let lastSshEnabled = Boolean($("sshEnabled")?.checked);
 
     const defaultsByType = {
       mysql: { host: "localhost", port: "3306", user: "root" },
@@ -358,7 +496,18 @@ function renderHtml(existing?: ConnectionConfig): string {
     }
 
     $("type").addEventListener("change", onTypeChange);
+    $("showPassword").addEventListener("change", () => {
+      $("password").type = $("showPassword").checked ? "text" : "password";
+    });
+    $("showSshPassword").addEventListener("change", () => {
+      $("sshPassword").type = $("showSshPassword").checked ? "text" : "password";
+    });
+    $("sshEnabled").addEventListener("change", () => {
+      lastSshEnabled = Boolean($("sshEnabled").checked);
+      setVisible("group-ssh", lastSshEnabled);
+    });
     onTypeChange();
+    setVisible("group-ssh", lastSshEnabled);
 
     function collect() {
       const type = $("type").value;
@@ -372,8 +521,17 @@ function renderHtml(existing?: ConnectionConfig): string {
         ssl: $("ssl")?.checked,
         sqliteFilePath: $("sqliteFilePath")?.value,
         oracleConnectString: $("oracleConnectString")?.value || $("host")?.value,
+        oraclePrivilege: $("oraclePrivilege")?.value,
         redisDatabase: $("redisDatabase")?.value,
         password: $("password")?.value,
+        sshEnabled: $("sshEnabled")?.checked,
+        sshHost: $("sshHost")?.value,
+        sshPort: $("sshPort")?.value,
+        sshUser: $("sshUser")?.value,
+        sshPrivateKeyPath: $("sshPrivateKeyPath")?.value,
+        sshPassword: $("sshPassword")?.value,
+        sshRemoteHost: $("sshRemoteHost")?.value,
+        sshRemotePort: $("sshRemotePort")?.value,
         resetPassword: $("resetPassword")?.checked
       };
     }
@@ -381,6 +539,10 @@ function renderHtml(existing?: ConnectionConfig): string {
     $("save").addEventListener("click", () => {
       errorEl.textContent = "";
       vscode.postMessage({ type: "save", payload: collect() });
+    });
+    $("test").addEventListener("click", () => {
+      errorEl.textContent = "";
+      vscode.postMessage({ type: "test", payload: collect() });
     });
     $("cancel").addEventListener("click", () => vscode.postMessage({ type: "cancel" }));
 

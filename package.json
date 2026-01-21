@@ -137,6 +137,16 @@
         "command": "moreConnect.generateTableDdl",
         "title": "More Connect: Generate Table DDL",
         "icon": "$(symbol-structure)"
+      },
+      {
+        "command": "moreConnect.setConnectionsStorageFolder",
+        "title": "More Connect: Set Connections Storage Folder",
+        "icon": "$(folder)"
+      },
+      {
+        "command": "moreConnect.showStoragePaths",
+        "title": "More Connect: Show Storage Paths",
+        "icon": "$(folder-opened)"
       }
     ],
     "viewsContainers": {
@@ -160,6 +170,11 @@
       "view/title": [
         {
           "command": "moreConnect.addConnection",
+          "when": "view == moreConnectConnections",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.setConnectionsStorageFolder",
           "when": "view == moreConnectConnections",
           "group": "navigation"
         },
@@ -248,6 +263,11 @@
           "group": "navigation"
         },
         {
+          "command": "moreConnect.runSqlFromEditor",
+          "when": "resourceLangId == sql",
+          "group": "navigation"
+        },
+        {
           "command": "moreConnect.runSqlFile",
           "when": "resourceLangId == sql",
           "group": "navigation"
@@ -288,6 +308,7 @@
   },
   "dependencies": {
     "mysql2": "^3.11.0",
-    "pg": "^8.12.0"
+    "pg": "^8.12.0",
+    "ssh2": "^1.16.0"
   }
 }
