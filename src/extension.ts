@@ -24,6 +24,9 @@ type SavedSql = {
   id: string;
   name: string;
   sql: string;
+  connectionId?: string;
+  database?: string;
+  favorite?: boolean;
   updatedAt: number;
 };
 
@@ -114,6 +117,13 @@ export async function activate(context: vscode.ExtensionContext) {
       return false;
     },
     getActiveConnectionId,
+    listFavoriteSql: (connectionId, database) => {
+      const all = listSavedSql();
+      return all
+        .filter((s) => s.favorite === true && s.connectionId === connectionId && (s.database ?? "") === (database ?? ""))
+        .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+        .map((s) => ({ id: s.id, name: s.name, sql: s.sql }));
+    },
     listDatabases: async (config) => {
       const client = await getOrCreateClient(config);
       if (!client.isConnected) await connect(config);
@@ -409,12 +419,18 @@ export async function activate(context: vscode.ExtensionContext) {
   }
 
   async function disconnect(config: ConnectionConfig): Promise<void> {
+    const keys: string[] = [];
     for (const [key, client] of clientsByKey.entries()) {
-      if (key.startsWith(`${config.id}::`) && client.isConnected) {
+      if (!key.startsWith(`${config.id}::`)) continue;
+      keys.push(key);
+      try {
         await client.disconnect();
-      }
+      } catch {}
     }
-    await tunnels.closeTunnel(config.id);
+    for (const k of keys) clientsByKey.delete(k);
+    try {
+      await tunnels.closeTunnel(config.id);
+    } catch {}
     view.refresh();
   }
 
@@ -796,6 +812,58 @@ export async function activate(context: vscode.ExtensionContext) {
 
     await upsertSavedSql({ id: randomUUID(), name: name.trim(), sql: doc.getText() });
     vscode.window.showInformationMessage(`Saved SQL: ${name.trim()}`);
+  }
+
+  function inferDefaultSqlNameFromEditor(doc: vscode.TextDocument): string {
+    const first = doc.lineCount > 0 ? doc.lineAt(0).text.trim() : "";
+    const m = first.match(/^--\s*(.+)$/);
+    if (m?.[1]?.trim()) return m[1].trim();
+    if (!doc.isUntitled) return vscode.workspace.asRelativePath(doc.uri, false);
+    return "Untitled SQL";
+  }
+
+  async function addSqlFavoriteFromEditor(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) return;
+    const doc = editor.document;
+    if (doc.languageId !== "sql" && !doc.fileName.toLowerCase().endsWith(".sql")) {
+      vscode.window.showInformationMessage("Open a .sql document first.");
+      return;
+    }
+
+    const connections = store.list();
+    const fileCtx = !doc.isUntitled ? getSqlFileContext(doc.uri) : undefined;
+    const active = getActiveConnection();
+    const selectedConn = fileCtx?.connectionId ? connections.find((c) => c.id === fileCtx.connectionId) : undefined;
+    const effectiveConn = selectedConn ?? active ?? pickConnectedOrAnyConnection();
+    if (!effectiveConn) {
+      vscode.window.showInformationMessage("No connections. Add one first.");
+      return;
+    }
+    const effectiveDb = fileCtx?.database ?? effectiveConn.database ?? "";
+    if (!effectiveDb) {
+      vscode.window.showInformationMessage("Select a database for this .sql first.");
+      return;
+    }
+
+    const name =
+      (await vscode.window.showInputBox({
+        title: "Add SQL to favorites",
+        value: inferDefaultSqlNameFromEditor(doc),
+        ignoreFocusOut: true
+      })) ?? "";
+    if (!name.trim()) return;
+
+    await upsertSavedSql({
+      id: randomUUID(),
+      name: name.trim(),
+      sql: doc.getText(),
+      connectionId: effectiveConn.id,
+      database: effectiveDb,
+      favorite: true
+    });
+    view.refresh();
+    vscode.window.showInformationMessage(`Added to favorites: ${name.trim()} (${effectiveConn.name} / ${effectiveDb})`);
   }
 
   async function openSavedSqlPicker(): Promise<void> {
@@ -1420,9 +1488,21 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
     vscode.commands.registerCommand("moreConnect.newSql", createNewSqlFromContext),
     vscode.commands.registerCommand("moreConnect.openSavedSql", openSavedSqlPicker),
     vscode.commands.registerCommand("moreConnect.saveSqlToGlobal", saveActiveEditorSqlToGlobal),
+    vscode.commands.registerCommand("moreConnect.addSqlFavoriteFromEditor", addSqlFavoriteFromEditor),
     vscode.commands.registerCommand("moreConnect.showDatabaseInfo", showDatabaseInfo),
     vscode.commands.registerCommand("moreConnect.showTableInfo", showTableInfo),
-    vscode.commands.registerCommand("moreConnect.generateTableDdl", generateTableDdl)
+    vscode.commands.registerCommand("moreConnect.generateTableDdl", generateTableDdl),
+    vscode.commands.registerCommand("moreConnect.runFavoriteSql", async (node?: ExplorerNode) => {
+      if (!node || (node as any).kind !== "sqlItem") return;
+      const n = node as any as { connectionId: string; database: string; sql: string; name: string };
+      const config = store.list().find((c) => c.id === n.connectionId);
+      if (!config) return;
+      try {
+        await runQuery({ ...config, database: n.database }, n.sql);
+      } catch (e) {
+        vscode.window.showErrorMessage(`Query failed: ${(e as Error).message}`);
+      }
+    })
   );
 
   treeView.onDidChangeSelection(async (e) => {
@@ -1437,6 +1517,30 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
     vscode.workspace.onDidCloseTextDocument(() => updateSqlStatus())
   );
   updateSqlStatus();
+
+  context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider({ language: "sql" }, new (class implements vscode.CodeLensProvider {
+      onDidChangeCodeLenses?: vscode.Event<void> | undefined;
+      provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
+        if (document.isUntitled) return [];
+        const fileCtx = getSqlFileContext(document.uri);
+        const connections = store.list();
+        const active = getActiveConnection();
+        const selectedConn = fileCtx?.connectionId ? connections.find((c) => c.id === fileCtx.connectionId) : undefined;
+        const effectiveConn = selectedConn ?? active;
+        const effectiveDb = fileCtx?.database ?? effectiveConn?.database ?? "";
+        const pos = new vscode.Range(0, 0, 0, 0);
+        const label = effectiveConn
+          ? `$(database) ${effectiveConn.name}${effectiveDb ? ` / ${effectiveDb}` : ""}`
+          : "$(database) More Connect: No connection";
+        return [
+          new vscode.CodeLens(pos, { title: label, command: "moreConnect.selectConnectionForSql" }),
+          new vscode.CodeLens(pos, { title: "$(star) Add to favorites", command: "moreConnect.addSqlFavoriteFromEditor" }),
+          new vscode.CodeLens(pos, { title: "$(database) Select database", command: "moreConnect.selectDatabaseForSql" })
+        ];
+      }
+    })())
+  );
 }
 
 export async function deactivate() {}

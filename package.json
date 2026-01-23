@@ -149,6 +149,11 @@
         "icon": "$(save)"
       },
       {
+        "command": "moreConnect.addSqlFavoriteFromEditor",
+        "title": "More Connect: Add SQL to Favorites",
+        "icon": "$(star)"
+      },
+      {
         "command": "moreConnect.selectConnectionForSql",
         "title": "More Connect: Select Connection for .sql",
         "icon": "$(plug)"
@@ -162,6 +167,11 @@
         "command": "moreConnect.generateTableDdl",
         "title": "More Connect: Generate Table DDL",
         "icon": "$(symbol-structure)"
+      },
+      {
+        "command": "moreConnect.runFavoriteSql",
+        "title": "More Connect: Run Favorite SQL",
+        "icon": "$(play)"
       },
       {
         "command": "moreConnect.setConnectionsStorageFolder",

@@ -18,6 +18,19 @@ export type ExplorerNode =
       database: string;
     }
   | {
+      kind: "sqlFolder";
+      connectionId: string;
+      database: string;
+    }
+  | {
+      kind: "sqlItem";
+      connectionId: string;
+      database: string;
+      id: string;
+      name: string;
+      sql: string;
+    }
+  | {
       kind: "table";
       connectionId: string;
       database: string;
@@ -36,6 +49,7 @@ export type ExplorerDataSource = {
   isConnected(id: string): boolean;
   getActiveConnectionId(): string | undefined;
   listDatabases(connection: ConnectionConfig): Promise<string[]>;
+  listFavoriteSql(connectionId: string, database: string): Array<{ id: string; name: string; sql: string }>;
   listTables(
     connection: ConnectionConfig,
     database: string
@@ -78,6 +92,24 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
         const item = new vscode.TreeItem(element.database, vscode.TreeItemCollapsibleState.Collapsed);
         item.contextValue = "database";
         item.iconPath = new vscode.ThemeIcon("database");
+        return item;
+      }
+      case "sqlFolder": {
+        const item = new vscode.TreeItem("SQL", vscode.TreeItemCollapsibleState.Collapsed);
+        item.contextValue = "sqlFolder";
+        item.iconPath = new vscode.ThemeIcon("file-code");
+        return item;
+      }
+      case "sqlItem": {
+        const item = new vscode.TreeItem(element.name, vscode.TreeItemCollapsibleState.None);
+        item.contextValue = "sqlItem";
+        item.iconPath = new vscode.ThemeIcon("play");
+        item.command = {
+          command: "moreConnect.runFavoriteSql",
+          title: "Run SQL",
+          arguments: [element]
+        };
+        item.tooltip = element.sql.trim().slice(0, 600);
         return item;
       }
       case "table": {
@@ -135,13 +167,28 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
       const config = this.source.listConnections().find((c) => c.id === element.connectionId);
       if (!config) return [];
       const tables = await this.source.listTables(config, element.database);
-      return tables.map((t) => ({
-        kind: "table",
+      return [
+        { kind: "sqlFolder", connectionId: element.connectionId, database: element.database },
+        ...tables.map((t) => ({
+          kind: "table" as const,
+          connectionId: element.connectionId,
+          database: element.database,
+          table: t.name,
+          schema: t.schema,
+          tableType: t.type
+        }))
+      ];
+    }
+
+    if (element.kind === "sqlFolder") {
+      const items = this.source.listFavoriteSql(element.connectionId, element.database);
+      return items.map((s) => ({
+        kind: "sqlItem",
         connectionId: element.connectionId,
         database: element.database,
-        table: t.name,
-        schema: t.schema,
-        tableType: t.type
+        id: s.id,
+        name: s.name,
+        sql: s.sql
       }));
     }
 
