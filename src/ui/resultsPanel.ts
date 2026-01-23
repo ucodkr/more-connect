@@ -105,7 +105,7 @@ function renderHtml(connection: ConnectionConfig, sql: string, result: QueryResu
       :root { color-scheme: light dark; }
       body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif; padding: 12px; background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); }
       .meta { opacity: 0.8; margin-bottom: 10px; }
-      pre { white-space: pre-wrap; word-break: break-word; background: rgba(127,127,127,.12); padding: 10px; border-radius: 6px; }
+      textarea { width: 100%; box-sizing: border-box; min-height: 110px; resize: vertical; white-space: pre; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; background: rgba(127,127,127,.12); color: inherit; border: 1px solid rgba(127,127,127,.25); padding: 10px; border-radius: 6px; }
       table { width: 100%; border-collapse: collapse; }
       th, td { border-bottom: 1px solid rgba(127,127,127,.35); padding: 6px 8px; vertical-align: top; }
       th { position: sticky; top: 0; z-index: 2; background: var(--vscode-editor-background); text-align: left; }
@@ -120,11 +120,12 @@ function renderHtml(connection: ConnectionConfig, sql: string, result: QueryResu
   </head>
   <body>
     <div class="meta"><strong>${escapeHtml(connection.name)}</strong> — ${escapeHtml(subtitle)} — ${escapeHtml(meta)}</div>
-    <pre>${escapeHtml(sql)}</pre>
     <div class="actions">
+      <button id="runSql">Run</button>
       <button id="rerunRowid">Re-run (editable)</button>
       <span class="status" id="status"></span>
     </div>
+    <textarea id="sql" spellcheck="false">${escapeHtml(sql)}</textarea>
     <table>
       <thead><tr>${headerCells}</tr></thead>
       <tbody>${bodyRows}</tbody>
@@ -135,14 +136,36 @@ function renderHtml(connection: ConnectionConfig, sql: string, result: QueryResu
       const state = ${JSON.stringify(initPayload)};
       const statusEl = document.getElementById("status");
       const rerunBtn = document.getElementById("rerunRowid");
+      const runBtn = document.getElementById("runSql");
+      const sqlEl = document.getElementById("sql");
 
       function setStatus(text) { statusEl.textContent = text || ""; }
-      function canRerun() { return state.dbType === "oracle" && !!state.table && !state.rowIdColumn; }
+      function canRerun() { return state.dbType === "oracle"; }
       rerunBtn.disabled = !canRerun();
-      rerunBtn.title = rerunBtn.disabled ? "Editing requires a single-table SELECT without joins." : "Re-run query with ROWID for editing.";
+      rerunBtn.title = rerunBtn.disabled ? "Re-run (editable) is only supported for Oracle." : "Re-run query with ROWID for editing.";
       rerunBtn.addEventListener("click", () => {
         setStatus("Re-running with ROWID...");
-        vscode.postMessage({ type: "results.rerunWithRowid", connectionId: state.connectionId, database: state.database, sql: state.sql });
+        vscode.postMessage({
+          type: "results.rerunWithRowid",
+          connectionId: state.connectionId,
+          database: state.database,
+          sql: String(sqlEl.value ?? "")
+        });
+      });
+
+      function runSql() {
+        const sql = String(sqlEl.value ?? "");
+        if (!sql.trim()) return;
+        setStatus("Running...");
+        vscode.postMessage({ type: "results.runSql", connectionId: state.connectionId, database: state.database, sql });
+      }
+      runBtn.addEventListener("click", runSql);
+      sqlEl.addEventListener("keydown", (e) => {
+        // Ctrl+Enter / Cmd+Enter
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          runSql();
+        }
       });
 
       if (state.editable) {

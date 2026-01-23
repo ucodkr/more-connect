@@ -706,6 +706,30 @@ export async function activate(context: vscode.ExtensionContext) {
 
   async function handleResultsPanelMessage(msg: any): Promise<void> {
     if (!msg || typeof msg !== "object") return;
+    if (msg.type === "results.runSql") {
+      const connectionId = String(msg.connectionId ?? "");
+      const sql = String(msg.sql ?? "");
+      const database = String(msg.database ?? "");
+      const baseConfig = store.list().find((c) => c.id === connectionId);
+      if (!baseConfig) {
+        postResultsStatus("Unknown connection.");
+        return;
+      }
+      const config = database ? { ...baseConfig, database } : baseConfig;
+      if (!sql.trim()) {
+        postResultsStatus("SQL is empty.");
+        return;
+      }
+      postResultsStatus("Running...");
+      try {
+        await runQuery(config, sql);
+        postResultsStatus("");
+      } catch (e) {
+        postResultsStatus(`Run failed: ${(e as Error).message}`);
+      }
+      return;
+    }
+
     if (msg.type === "results.rerunWithRowid") {
       const connectionId = String(msg.connectionId ?? "");
       const sql = String(msg.sql ?? "");
