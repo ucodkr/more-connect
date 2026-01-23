@@ -40,7 +40,9 @@ export async function activate(context: vscode.ExtensionContext) {
   await sshStore.init();
   const output = vscode.window.createOutputChannel("More Connect");
   logStoragePaths(output, context, store);
-  const resultsPanel = new ResultsPanel(context);
+  const resultsPanel = new ResultsPanel(context, async (msg) => {
+    await handleResultsPanelMessage(msg);
+  });
   const infoPanel = new InfoPanel(context);
   const connectionWizard = new ConnectionWizard(context);
   const sqlStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
@@ -202,6 +204,10 @@ export async function activate(context: vscode.ExtensionContext) {
     dragAndDropController
   });
   context.subscriptions.push(treeView, output);
+
+  function postResultsStatus(text: string): void {
+    resultsPanel.postMessage({ type: "results.status", text });
+  }
 
   async function getOrCreateClient(config: ConnectionConfig, databaseOverride?: string): Promise<DbClient> {
     const key = clientKey(config, databaseOverride);
@@ -412,12 +418,58 @@ export async function activate(context: vscode.ExtensionContext) {
     view.refresh();
   }
 
-  async function runQuery(config: ConnectionConfig, sql: string): Promise<void> {
+  function isLikelyDisconnectedError(err: unknown): boolean {
+    const msg = String((err as any)?.message ?? err ?? "").toLowerCase();
+    return (
+      msg.includes("not connected") ||
+      msg.includes("connection terminated") ||
+      msg.includes("connection lost") ||
+      msg.includes("econnreset") ||
+      msg.includes("server closed the connection") ||
+      msg.includes("dpi-1010") || // node-oracledb: not connected
+      msg.includes("ora-03114") ||
+      msg.includes("ora-03113") ||
+      msg.includes("ora-00028") ||
+      msg.includes("protocol_connection_lost") ||
+      msg.includes("cannot enqueue query") ||
+      msg.includes("client has encountered a connection error")
+    );
+  }
+
+  async function ensureConnectedWithRetry(config: ConnectionConfig, actionLabel: string): Promise<boolean> {
     const client = await getOrCreateClient(config);
     if (!client.isConnected) {
       await connect(config);
+      return client.isConnected;
     }
-    if (!client.isConnected) return;
+    // Client thinks it's connected; validate with a cheap ping to catch stale sockets.
+    try {
+      if (config.type === "postgres") await client.query("SELECT 1;");
+      else if (config.type === "mysql" || config.type === "mariadb") await client.query("SELECT 1;");
+      else if (config.type === "sqlite") await client.query("SELECT 1;");
+      else if (config.type === "oracle") await client.query("SELECT 1 FROM DUAL");
+      else if (config.type === "redis") await client.query("PING");
+      return true;
+    } catch (e) {
+      if (!isLikelyDisconnectedError(e)) throw e;
+      const choice = await vscode.window.showWarningMessage(
+        `Connection looks disconnected. Reconnect to continue ${actionLabel}?`,
+        { modal: true },
+        "Reconnect",
+        "Cancel"
+      );
+      if (choice !== "Reconnect") return false;
+      try {
+        await disconnect(config);
+      } catch {}
+      await connect(config);
+      return (await getOrCreateClient(config)).isConnected;
+    }
+  }
+
+  async function runQuery(config: ConnectionConfig, sql: string): Promise<void> {
+    const client = await getOrCreateClient(config);
+    if (!(await ensureConnectedWithRetry(config, "running query"))) return;
 
     output.show(true);
     output.appendLine(`\n[${new Date().toISOString()}] ${config.name} — Running query...`);
@@ -507,6 +559,7 @@ export async function activate(context: vscode.ExtensionContext) {
     try {
       const effectiveConfig = fileCtx?.database ? { ...config, database: fileCtx.database } : config;
       await runQuery(effectiveConfig, sql);
+      await setSqlFileContext(editor.document.uri, { connectionId: effectiveConfig.id, database: effectiveConfig.database });
     } catch (e) {
       vscode.window.showErrorMessage(`Query failed: ${(e as Error).message}`);
     }
@@ -538,6 +591,9 @@ export async function activate(context: vscode.ExtensionContext) {
     try {
       const effectiveConfig = fileCtx?.database ? { ...config, database: fileCtx.database } : config;
       await runQuery(effectiveConfig, sql);
+      if (!doc.isUntitled && doc.fileName.toLowerCase().endsWith(".sql")) {
+        await setSqlFileContext(doc.uri, { connectionId: effectiveConfig.id, database: effectiveConfig.database });
+      }
     } catch (e) {
       vscode.window.showErrorMessage(`Query failed: ${(e as Error).message}`);
     }
@@ -594,8 +650,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
     try {
       const client = await getOrCreateClient(config);
-      if (!client.isConnected) await connect(config);
-      if (!client.isConnected) return;
+      if (!(await ensureConnectedWithRetry(config, "listing databases"))) return;
       const dbs = await client.listDatabases();
       const pick = await vscode.window.showQuickPick(
         dbs.map((db) => ({ label: db, picked: db === (existing?.database ?? config.database) })),
@@ -606,6 +661,101 @@ export async function activate(context: vscode.ExtensionContext) {
       vscode.window.showInformationMessage(`SQL file DB: ${pick.label}`);
     } catch (e) {
       vscode.window.showErrorMessage(`Database list failed: ${(e as Error).message}`);
+    }
+  }
+
+  function toOracleStringLiteral(value: unknown): string {
+    if (value === null || value === undefined) return "NULL";
+    if (typeof value === "number") return Number.isFinite(value) ? String(value) : "NULL";
+    if (typeof value === "boolean") return value ? "1" : "0";
+    const s = String(value);
+    return `'${s.replaceAll("'", "''")}'`;
+  }
+
+  function rewriteOracleSelectToIncludeRowid(sql: string): { rewritten: string; table: string } | undefined {
+    const s = sql.replaceAll(/\s+/g, " ").trim().replaceAll(/;+\s*$/g, "");
+    if (!/^select\b/i.test(s)) return;
+    if (/\bjoin\b|,/.test(s.toLowerCase())) return;
+    const m = s.match(/\bfrom\s+([a-zA-Z0-9_$#."]+)(?:\s+(?:where|order\s+by|group\s+by|fetch|offset|for)\b|$)/i);
+    if (!m) return;
+    const table = m[1];
+    // Insert ROWID into SELECT list.
+    const m2 = s.match(/^\s*select\s+(.*?)\s+from\s+/i);
+    if (!m2) return;
+    const selectList = m2[1];
+    if (/\browid\b/i.test(selectList)) return;
+    const rewritten = s.replace(/^\s*select\s+/i, "SELECT ROWID AS ROWID, ");
+    return { rewritten, table };
+  }
+
+  async function handleResultsPanelMessage(msg: any): Promise<void> {
+    if (!msg || typeof msg !== "object") return;
+    if (msg.type === "results.rerunWithRowid") {
+      const connectionId = String(msg.connectionId ?? "");
+      const sql = String(msg.sql ?? "");
+      const config = store.list().find((c) => c.id === connectionId);
+      if (!config) {
+        postResultsStatus("Unknown connection.");
+        return;
+      }
+      if (config.type !== "oracle") {
+        postResultsStatus("Re-run editable is only implemented for Oracle.");
+        return;
+      }
+      const rewritten = rewriteOracleSelectToIncludeRowid(sql);
+      if (!rewritten) {
+        postResultsStatus("Can't auto-enable editing for this query (needs single-table SELECT).");
+        return;
+      }
+      postResultsStatus("Re-running...");
+      try {
+        await runQuery(config, rewritten.rewritten);
+        postResultsStatus("");
+      } catch (e) {
+        postResultsStatus(`Re-run failed: ${(e as Error).message}`);
+      }
+      return;
+    }
+
+    if (msg.type === "results.updateCell") {
+      const connectionId = String(msg.connectionId ?? "");
+      const database = String(msg.database ?? "");
+      const table = String(msg.table ?? "").trim();
+      const rowid = String(msg.rowid ?? "").trim();
+      const column = String(msg.column ?? "").trim();
+      const value = msg.value ?? "";
+
+      const baseConfig = store.list().find((c) => c.id === connectionId);
+      if (!baseConfig) {
+        postResultsStatus("Unknown connection.");
+        return;
+      }
+      const config = database ? { ...baseConfig, database } : baseConfig;
+      if (config.type !== "oracle") {
+        postResultsStatus("Editing is only implemented for Oracle results.");
+        return;
+      }
+      if (!table || !rowid || !column) {
+        postResultsStatus("Missing edit context (table/rowid/column).");
+        return;
+      }
+
+      const updateSql = `UPDATE ${table} SET ${column} = ${toOracleStringLiteral(value)} WHERE ROWID = ${toOracleStringLiteral(
+        rowid
+      )}`;
+      try {
+        if (!(await ensureConnectedWithRetry(config, "saving changes"))) {
+          postResultsStatus("Canceled.");
+          return;
+        }
+        const client = await getOrCreateClient(config);
+        await client.query(updateSql);
+        postResultsStatus("Saved.");
+        return;
+      } catch (e) {
+        postResultsStatus(`Save failed: ${(e as Error).message}`);
+        return;
+      }
     }
   }
 
