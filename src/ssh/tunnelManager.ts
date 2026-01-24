@@ -2,6 +2,7 @@ import * as net from "node:net";
 import * as fs from "node:fs";
 import type { OptionalModuleLoader } from "../db/factory";
 import type { ConnectionConfig } from "../types";
+import { withTimeout } from "../utils/withTimeout";
 
 type SshClient = {
   on(event: "error", cb: (e: Error) => void): void;
@@ -30,7 +31,8 @@ export class TunnelManager {
 
   public async ensureTunnel(
     config: ConnectionConfig,
-    sshPassword: string | undefined
+    sshPassword: string | undefined,
+    timeoutMs?: number
   ): Promise<{ host: string; port: number } | undefined> {
     if (!config.sshEnabled) return;
     const existing = this.byConnectionId.get(config.id);
@@ -53,19 +55,23 @@ export class TunnelManager {
     }
 
     const sshClient: SshClient = new ssh2.Client();
-    await new Promise<void>((resolve, reject) => {
-      sshClient.on("ready", () => resolve());
-      sshClient.on("error", (e) => reject(e));
-      const privateKeyPath = config.sshPrivateKeyPath?.trim();
-      const privateKey = privateKeyPath ? fs.readFileSync(privateKeyPath, "utf8") : undefined;
-      sshClient.connect({
-        host: sshHost,
-        port: sshPort,
-        username: sshUser,
-        password: sshPassword || undefined,
-        privateKey
-      });
-    });
+    await withTimeout(
+      new Promise<void>((resolve, reject) => {
+        sshClient.on("ready", () => resolve());
+        sshClient.on("error", (e) => reject(e));
+        const privateKeyPath = config.sshPrivateKeyPath?.trim();
+        const privateKey = privateKeyPath ? fs.readFileSync(privateKeyPath, "utf8") : undefined;
+        sshClient.connect({
+          host: sshHost,
+          port: sshPort,
+          username: sshUser,
+          password: sshPassword || undefined,
+          privateKey
+        });
+      }),
+      timeoutMs ?? 0,
+      `SSH connection timed out after ${timeoutMs}ms`
+    );
 
     const server = net.createServer((localSocket) => {
       sshClient.forwardOut(
@@ -85,14 +91,18 @@ export class TunnelManager {
     });
 
     const localHost = "127.0.0.1";
-    const localPort = await new Promise<number>((resolve, reject) => {
-      server.on("error", reject);
-      server.listen(0, localHost, () => {
-        const addr = server.address();
-        if (!addr || typeof addr === "string") return reject(new Error("Failed to bind local tunnel port"));
-        resolve(addr.port);
-      });
-    });
+    const localPort = await withTimeout(
+      new Promise<number>((resolve, reject) => {
+        server.on("error", reject);
+        server.listen(0, localHost, () => {
+          const addr = server.address();
+          if (!addr || typeof addr === "string") return reject(new Error("Failed to bind local tunnel port"));
+          resolve(addr.port);
+        });
+      }),
+      timeoutMs ?? 0,
+      `SSH tunnel setup timed out after ${timeoutMs}ms`
+    );
 
     const handle: TunnelHandle = {
       localHost,
@@ -115,4 +125,3 @@ export class TunnelManager {
     await handle.close();
   }
 }
-

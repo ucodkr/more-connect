@@ -32,6 +32,18 @@
   "main": "./dist/extension.js",
   "icon": "media/extension-icon.svg.png",
   "contributes": {
+    "configuration": {
+      "title": "More Connect",
+      "properties": {
+        "moreConnect.connectionTimeoutMs": {
+          "type": "number",
+          "default": 15000,
+          "minimum": 1000,
+          "maximum": 300000,
+          "description": "Connection/SSH timeout in milliseconds before failing instead of waiting indefinitely."
+        }
+      }
+    },
     "commands": [
       {
         "command": "moreConnect.addConnection",

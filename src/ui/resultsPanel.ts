@@ -115,6 +115,7 @@ function renderHtml(connection: ConnectionConfig, sql: string, result: QueryResu
       button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
       button:disabled { opacity: .5; cursor: default; }
       .status { opacity: .8; }
+      .status.error { color: var(--vscode-errorForeground); opacity: 1; }
       td[contenteditable="true"] { outline: 1px dashed rgba(127,127,127,.55); outline-offset: -2px; }
     </style>
   </head>
@@ -139,7 +140,11 @@ function renderHtml(connection: ConnectionConfig, sql: string, result: QueryResu
       const runBtn = document.getElementById("runSql");
       const sqlEl = document.getElementById("sql");
 
-      function setStatus(text) { statusEl.textContent = text || ""; }
+      function setStatus(text) {
+        const t = String(text || "");
+        statusEl.textContent = t;
+        statusEl.classList.toggle("error", /failed|timed out|unknown connection/i.test(t));
+      }
       function canRerun() { return state.dbType === "oracle"; }
       rerunBtn.disabled = !canRerun();
       rerunBtn.title = rerunBtn.disabled ? "Re-run (editable) is only supported for Oracle." : "Re-run query with ROWID for editing.";

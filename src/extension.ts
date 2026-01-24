@@ -13,6 +13,7 @@ import { TunnelManager } from "./ssh/tunnelManager";
 import { RedisClient } from "./db/redisClient";
 import { SshStore } from "./ssh/sshStore";
 import { parseSshConfig, readUserSshConfigText, sshConnectionsFromConfig } from "./ssh/sshConfig";
+import { TimeoutError, withTimeout } from "./utils/withTimeout";
 
 const SECRET_PREFIX = "moreConnect.password.";
 const SSH_SECRET_PREFIX = "moreConnect.sshPassword.";
@@ -219,6 +220,12 @@ export async function activate(context: vscode.ExtensionContext) {
     resultsPanel.postMessage({ type: "results.status", text });
   }
 
+  function getConnectionTimeoutMs(): number {
+    const v = vscode.workspace.getConfiguration("moreConnect").get<number>("connectionTimeoutMs", 15000);
+    if (!Number.isFinite(v) || v <= 0) return 15000;
+    return Math.min(Math.max(Math.trunc(v), 1000), 300000);
+  }
+
   async function getOrCreateClient(config: ConnectionConfig, databaseOverride?: string): Promise<DbClient> {
     const key = clientKey(config, databaseOverride);
     const existing = clientsByKey.get(key);
@@ -334,11 +341,12 @@ export async function activate(context: vscode.ExtensionContext) {
   }
 
   async function connect(config: ConnectionConfig): Promise<void> {
+    const timeoutMs = getConnectionTimeoutMs();
     if (config.sshEnabled) {
       const sshPw = await ensureSshPassword(config);
       if (sshPw === undefined) return;
       try {
-        const forwarded = await tunnels.ensureTunnel(config, sshPw);
+        const forwarded = await tunnels.ensureTunnel(config, sshPw, timeoutMs);
         if (forwarded) {
           config = { ...config, host: forwarded.host, port: forwarded.port };
         }
@@ -356,13 +364,18 @@ export async function activate(context: vscode.ExtensionContext) {
     const password = await ensurePassword(config);
     if (password === undefined) return;
     try {
-      await client.connect(password);
+      await withTimeout(
+        client.connect(password),
+        timeoutMs,
+        `Connection timed out after ${timeoutMs}ms (check host/port/credentials).`
+      );
     } catch (e) {
       const err = e as Error;
       if (err.message?.startsWith("Missing driver:")) {
         await showMissingDriverHelp(context, driverDir.fsPath, err.message);
         return;
       }
+      if (err instanceof TimeoutError) throw new Error(err.message);
       throw e;
     }
     view.refresh();
@@ -373,10 +386,11 @@ export async function activate(context: vscode.ExtensionContext) {
     password: string | undefined,
     sshPassword: string | undefined
   ): Promise<void> {
+    const timeoutMs = getConnectionTimeoutMs();
     let effective = config;
     if (effective.sshEnabled) {
       try {
-        const forwarded = await tunnels.ensureTunnel(effective, sshPassword);
+        const forwarded = await tunnels.ensureTunnel(effective, sshPassword, timeoutMs);
         if (forwarded) effective = { ...effective, host: forwarded.host, port: forwarded.port };
       } catch (e) {
         const err = e as Error;
@@ -396,7 +410,11 @@ export async function activate(context: vscode.ExtensionContext) {
 
     const pw = effective.type === "sqlite" ? "" : password ?? "";
     try {
-      await client.connect(pw);
+      await withTimeout(
+        client.connect(pw),
+        timeoutMs,
+        `Connection timed out after ${timeoutMs}ms (check host/port/credentials).`
+      );
       // lightweight sanity query
       if (effective.type === "postgres") await client.query("SELECT 1;");
       else if (effective.type === "mysql" || effective.type === "mariadb") await client.query("SELECT 1;");
