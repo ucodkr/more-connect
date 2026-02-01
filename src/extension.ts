@@ -54,6 +54,8 @@ export async function activate(context: vscode.ExtensionContext) {
   sqlStatus.command = "moreConnect.selectConnectionForSql";
   context.subscriptions.push(sqlStatus);
 
+  const activeDbByConnectionId = new Map<string, string>();
+
   const clientsByKey = new Map<string, DbClient>();
   const driverDir = vscode.Uri.joinPath(context.globalStorageUri, "drivers");
   const moduleLoader: OptionalModuleLoader = createGlobalStorageModuleLoader(driverDir.fsPath);
@@ -74,6 +76,17 @@ export async function activate(context: vscode.ExtensionContext) {
     updateSqlStatus();
   }
 
+  function setActiveDatabaseForConnection(connectionId: string, database: string): void {
+    if (!database) return;
+    activeDbByConnectionId.set(connectionId, database);
+    updateSqlStatus();
+  }
+
+  function getActiveDatabaseForConnection(connectionId: string | undefined): string | undefined {
+    if (!connectionId) return;
+    return activeDbByConnectionId.get(connectionId);
+  }
+
   function getSqlFileContext(uri: vscode.Uri): SqlFileContext | undefined {
     const all = context.globalState.get<Record<string, SqlFileContext>>(SQL_FILE_CONTEXT_KEY, {});
     return all[uri.toString()];
@@ -83,6 +96,9 @@ export async function activate(context: vscode.ExtensionContext) {
     const all = context.globalState.get<Record<string, SqlFileContext>>(SQL_FILE_CONTEXT_KEY, {});
     all[uri.toString()] = { ...next, updatedAt: Date.now() };
     await context.globalState.update(SQL_FILE_CONTEXT_KEY, all);
+    if (next.connectionId && next.database) {
+      setActiveDatabaseForConnection(next.connectionId, next.database);
+    }
     updateSqlStatus();
   }
 
@@ -214,7 +230,29 @@ export async function activate(context: vscode.ExtensionContext) {
     treeDataProvider: view,
     dragAndDropController
   });
-  context.subscriptions.push(treeView, output);
+  context.subscriptions.push(
+    treeView,
+    output,
+    treeView.onDidChangeSelection((e) => {
+      const node = e.selection[0];
+      if (!node) return;
+      if (node.kind === "database") {
+        setActiveDatabaseForConnection(node.connectionId, node.database);
+        return;
+    }
+    if (node.kind === "table") {
+      setActiveDatabaseForConnection(node.connectionId, node.database);
+      return;
+    }
+    if (node.kind === "sqlFolder") {
+      setActiveDatabaseForConnection(node.connectionId, node.database);
+      return;
+    }
+      if (node.kind === "sqlItem") {
+        setActiveDatabaseForConnection(node.connectionId, node.database);
+      }
+    })
+  );
 
   function postResultsStatus(text: string): void {
     resultsPanel.postMessage({ type: "results.status", text });
@@ -509,6 +547,7 @@ export async function activate(context: vscode.ExtensionContext) {
     output.appendLine(`\n[${new Date().toISOString()}] ${config.name} — Running query...`);
     output.appendLine(sql);
 
+    if (config.database) setActiveDatabaseForConnection(config.id, config.database);
     const result = await client.query(sql);
     output.appendLine(`Result: rows=${result.rowCount ?? result.rows.length}, duration=${result.durationMs}ms`);
     resultsPanel.show(config, sql, result);
@@ -543,13 +582,14 @@ export async function activate(context: vscode.ExtensionContext) {
     }
 
     const connections = store.list();
-    const fileCtx = !doc.isUntitled ? getSqlFileContext(doc.uri) : undefined;
+    const fileCtx = getSqlFileContext(doc.uri);
     const active = getActiveConnection();
     const selectedConn = fileCtx?.connectionId
       ? connections.find((c) => c.id === fileCtx.connectionId)
       : undefined;
     const effectiveConn = selectedConn ?? active;
-    const effectiveDb = fileCtx?.database ?? effectiveConn?.database;
+    const effectiveDb =
+      fileCtx?.database ?? effectiveConn?.database ?? getActiveDatabaseForConnection(effectiveConn?.id);
 
     if (!effectiveConn) {
       sqlStatus.text = "$(database) More Connect: No connection";
@@ -591,11 +631,13 @@ export async function activate(context: vscode.ExtensionContext) {
       return;
     }
     try {
-      const effectiveConfig = fileCtx?.database ? { ...config, database: fileCtx.database } : config;
+      const fallbackDb = getActiveDatabaseForConnection(config.id);
+      const effectiveDb = fileCtx?.database ?? config.database ?? fallbackDb;
+      const effectiveConfig = effectiveDb ? { ...config, database: effectiveDb } : config;
       await runQuery(effectiveConfig, sql);
       await setSqlFileContext(editor.document.uri, { connectionId: effectiveConfig.id, database: effectiveConfig.database });
     } catch (e) {
-      vscode.window.showErrorMessage(`Query failed: ${(e as Error).message}`);
+      vscode.window.showErrorMessage(`Query failed[0]: ${(e as Error).message}`);
     }
   }
 
@@ -612,7 +654,7 @@ export async function activate(context: vscode.ExtensionContext) {
       : doc.getText(selection);
     if (!sql.trim()) return;
 
-    const fileCtx = !doc.isUntitled ? getSqlFileContext(doc.uri) : undefined;
+    const fileCtx = getSqlFileContext(doc.uri);
     const connections = store.list();
     const fileConnection = fileCtx?.connectionId
       ? connections.find((c) => c.id === fileCtx.connectionId)
@@ -623,13 +665,15 @@ export async function activate(context: vscode.ExtensionContext) {
       return;
     }
     try {
-      const effectiveConfig = fileCtx?.database ? { ...config, database: fileCtx.database } : config;
+      const fallbackDb = getActiveDatabaseForConnection(config.id);
+      const effectiveDb = fileCtx?.database ?? config.database ?? fallbackDb;
+      const effectiveConfig = effectiveDb ? { ...config, database: effectiveDb } : config;
       await runQuery(effectiveConfig, sql);
       if (!doc.isUntitled && doc.fileName.toLowerCase().endsWith(".sql")) {
         await setSqlFileContext(doc.uri, { connectionId: effectiveConfig.id, database: effectiveConfig.database });
       }
     } catch (e) {
-      vscode.window.showErrorMessage(`Query failed: ${(e as Error).message}`);
+      vscode.window.showErrorMessage(`Query failed[2]: ${(e as Error).message}`);
     }
   }
 
@@ -692,6 +736,7 @@ export async function activate(context: vscode.ExtensionContext) {
       );
       if (!pick) return;
       await setSqlFileContext(doc.uri, { connectionId: config.id, database: pick.label });
+      setActiveDatabaseForConnection(config.id, pick.label);
       vscode.window.showInformationMessage(`SQL file DB: ${pick.label}`);
     } catch (e) {
       vscode.window.showErrorMessage(`Database list failed: ${(e as Error).message}`);
@@ -1497,18 +1542,23 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
       try {
         await runQuery(effectiveConfig, sql);
       } catch (e) {
-        vscode.window.showErrorMessage(`Query failed: ${(e as Error).message}`);
+        vscode.window.showErrorMessage(`Query failed[2]: ${(e as Error).message}`);
       }
     }),
 
     vscode.commands.registerCommand("moreConnect.runQueryFromEditor", async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) return;
+      const doc = editor.document;
+      const isSql = doc.languageId === "sql" || doc.fileName.toLowerCase().endsWith(".sql");
+      if (isSql) {
+        await runSqlFromEditor();
+        return;
+      }
       const selection = editor.selection;
       const sql = selection.isEmpty
-        ? sqlStatementAtCursor(editor.document, selection.active) ||
-          editor.document.lineAt(selection.active.line).text
-        : editor.document.getText(selection);
+        ? sqlStatementAtCursor(doc, selection.active) || doc.lineAt(selection.active.line).text
+        : doc.getText(selection);
 
       const config = pickConnectedOrAnyConnection();
       if (!config) {
@@ -1519,7 +1569,7 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
       try {
         await runQuery(config, sql);
       } catch (e) {
-        vscode.window.showErrorMessage(`Query failed: ${(e as Error).message}`);
+        vscode.window.showErrorMessage(`Query failed[4]: ${(e as Error).message}`);
       }
     })
     ,
@@ -1542,7 +1592,7 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
       try {
         await runQuery({ ...config, database: n.database }, n.sql);
       } catch (e) {
-        vscode.window.showErrorMessage(`Query failed: ${(e as Error).message}`);
+        vscode.window.showErrorMessage(`Query failed[3]: ${(e as Error).message}`);
       }
     })
   );

@@ -30,7 +30,7 @@
     "onView:moreConnectConnections"
   ],
   "main": "./dist/extension.js",
-  "icon": "media/extension-icon.svg.png",
+  "icon": "media/ucod.png",
   "contributes": {
     "configuration": {
       "title": "More Connect",

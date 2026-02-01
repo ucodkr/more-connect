@@ -109,7 +109,8 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
           title: "Run SQL",
           arguments: [element]
         };
-        item.tooltip = element.sql.trim().slice(0, 600);
+        // Avoid showing raw SQL in the explorer list/tooltip.
+        item.tooltip = element.name;
         return item;
       }
       case "table": {
