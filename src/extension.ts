@@ -413,6 +413,9 @@ export async function activate(context: vscode.ExtensionContext) {
         await showMissingDriverHelp(context, driverDir.fsPath, err.message);
         return;
       }
+      try {
+        await disconnect(config);
+      } catch {}
       if (err instanceof TimeoutError) throw new Error(err.message);
       throw e;
     }
@@ -1471,6 +1474,13 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
       try {
         await connect(config);
         await setActiveConnectionId(config.id);
+        const activeNode: ExplorerNode = {
+          kind: "connection",
+          config,
+          connected: true,
+          active: true
+        };
+        await treeView.reveal(activeNode, { expand: true, focus: false, select: false });
       } catch (e) {
         vscode.window.showErrorMessage(`Connect failed: ${(e as Error).message}`);
       }
