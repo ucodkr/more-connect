@@ -2,7 +2,7 @@
   "name": "more-connect",
   "displayName": "More Connect",
   "description": "Database client for MySQL/MariaDB/PostgreSQL inside VS Code.",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "publisher": "ucodkr",
   "engines": {
     "vscode": "^1.85.0"
