@@ -1003,7 +1003,12 @@ ORDER BY TABLE_NAME;`;
           String(r["table_type"] ?? "")
         ]))
       ].join("\n");
-      infoPanel.show(`DB Info: ${node.database}`, body);
+      infoPanel.show(`DB Info: ${node.database}`, body, {
+        showRefreshButton: true,
+        onRefresh: async () => {
+          await showDatabaseInfo(node);
+        }
+      });
     } catch (e) {
       vscode.window.showErrorMessage(`Info failed: ${(e as Error).message}`);
     }
@@ -1091,7 +1096,12 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
         indexesTable
       ].join("\n");
 
-      infoPanel.show(`Table Info: ${tableName}`, body);
+      infoPanel.show(`Table Info: ${tableName}`, body, {
+        showRefreshButton: true,
+        onRefresh: async () => {
+          await showTableInfo(node);
+        }
+      });
     } catch (e) {
       vscode.window.showErrorMessage(`Info failed: ${(e as Error).message}`);
     }
