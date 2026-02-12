@@ -27,6 +27,7 @@ MySQL/MariaDB/PostgreSQL/SQLite/Oracle/Redis에 연결하고 쿼리를 실행하
   1. Azure DevOps 로그인: `https://dev.azure.com`
   2. PAT 생성 페이지: `https://dev.azure.com/<조직명>/_usersSettings/tokens`
   3. 새 토큰 생성(만료 기간/권한 설정) 후 복사
+     - 필수 권한: **Marketplace > Manage**
   4. 로컬 갱신:
      - `vsce logout ucodkr`
      - `vsce login ucodkr`
