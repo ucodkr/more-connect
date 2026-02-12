@@ -20,3 +20,20 @@ MySQL/MariaDB/PostgreSQL/SQLite/Oracle/Redis에 연결하고 쿼리를 실행하
 2. `npm run build`
 3. VS Code에서 `Run and Debug` → `Run Extension`
 4. Explorer의 `More Connect` 뷰에서 연결 추가 후 쿼리 실행
+
+## Publish (VSCE / PAT)
+- `vsce publish` 실패 시 `The Personal Access Token used has expired.` 에러가 나오면, 기존 PAT 만료 연장은 불가하며 **새 PAT 발급 후 교체**해야 합니다.
+- 기본 절차:
+  1. Azure DevOps 로그인: `https://dev.azure.com`
+  2. PAT 생성 페이지: `https://dev.azure.com/<조직명>/_usersSettings/tokens`
+  3. 새 토큰 생성(만료 기간/권한 설정) 후 복사
+  4. 로컬 갱신:
+     - `vsce logout ucodkr`
+     - `vsce login ucodkr`
+  5. 재배포: `npx vsce publish`
+
+### 토큰 페이지 접속이 안 될 때
+- 퍼블리셔 소유 계정(`ucodkr`)과 동일한 Microsoft 계정으로 로그인했는지 확인
+- 시크릿 모드에서 `https://dev.azure.com` 먼저 로그인 후 토큰 페이지 접근
+- 조직 미존재/권한 없음 상태인지 확인(조직 생성 또는 초대 필요)
+- 사내망/보안 정책으로 `dev.azure.com` 차단 여부 확인(개인망으로 테스트)
