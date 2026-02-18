@@ -1536,6 +1536,10 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
       await vscode.env.openExternal(vscode.Uri.parse(normalizedUrl, true));
     }),
 
+    vscode.commands.registerCommand("moreConnect.openBrowserDevTools", async () => {
+      await vscode.commands.executeCommand("workbench.action.webview.openDeveloperTools");
+    }),
+
     vscode.commands.registerCommand("moreConnect.addConnection", async () => {
       const created = await promptConnectionConfig();
       if (!created) return;

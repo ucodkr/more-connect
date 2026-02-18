@@ -29,6 +29,7 @@
     "onCommand:moreConnect.runQuery",
     "onCommand:moreConnect.openInternalBrowser",
     "onCommand:moreConnect.openExternalBrowser",
+    "onCommand:moreConnect.openBrowserDevTools",
     "onView:moreConnectConnections"
   ],
   "main": "./dist/extension.js",
@@ -158,6 +159,11 @@
         "icon": "$(browser)"
       },
       {
+        "command": "moreConnect.openBrowserDevTools",
+        "title": "More Connect: Open Browser Developer Tools",
+        "icon": "$(tools)"
+      },
+      {
         "command": "moreConnect.runSqlFile",
         "title": "More Connect: Run .sql File (Active Connection)",
         "icon": "$(play)"
@@ -263,6 +269,11 @@
           "group": "navigation"
         },
         {
+          "command": "moreConnect.openBrowserDevTools",
+          "when": "view == moreConnectConnections",
+          "group": "navigation"
+        },
+        {
           "command": "moreConnect.setConnectionsStorageFolder",
           "when": "view == moreConnectConnections",
           "group": "navigation"
@@ -361,6 +372,11 @@
           "group": "inline"
         },
         {
+          "command": "moreConnect.openBrowserDevTools",
+          "when": "view == moreConnectConnections && viewItem == webLink",
+          "group": "navigation"
+        },
+        {
           "command": "moreConnect.editWebLink",
           "when": "view == moreConnectConnections && viewItem == webLink",
           "group": "navigation"
@@ -432,6 +448,9 @@
         },
         {
           "command": "moreConnect.openExternalBrowser"
+        },
+        {
+          "command": "moreConnect.openBrowserDevTools"
         }
       ]
     },

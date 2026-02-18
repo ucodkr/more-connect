@@ -150,8 +150,8 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
         item.tooltip = element.link.url;
         item.iconPath = new vscode.ThemeIcon("link-external");
         item.command = {
-          command: "moreConnect.openInternalBrowserFromLink",
-          title: "Open Internal Browser",
+          command: "moreConnect.openExternalBrowser",
+          title: "Open External Browser",
           arguments: [element]
         };
         return item;
