@@ -27,6 +27,8 @@
   "activationEvents": [
     "onCommand:moreConnect.addConnection",
     "onCommand:moreConnect.runQuery",
+    "onCommand:moreConnect.openInternalBrowser",
+    "onCommand:moreConnect.openExternalBrowser",
     "onView:moreConnectConnections"
   ],
   "main": "./dist/extension.js",
@@ -126,6 +128,36 @@
         "icon": "$(trash)"
       },
       {
+        "command": "moreConnect.addWebLink",
+        "title": "More Connect: Add Web Link",
+        "icon": "$(add)"
+      },
+      {
+        "command": "moreConnect.editWebLink",
+        "title": "More Connect: Edit Web Link",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "moreConnect.removeWebLink",
+        "title": "More Connect: Remove Web Link",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "moreConnect.openInternalBrowser",
+        "title": "More Connect: Open Internal Browser",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "moreConnect.openInternalBrowserFromLink",
+        "title": "More Connect: Open Internal Browser (Saved Link)",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "moreConnect.openExternalBrowser",
+        "title": "More Connect: Open External Browser",
+        "icon": "$(browser)"
+      },
+      {
         "command": "moreConnect.runSqlFile",
         "title": "More Connect: Run .sql File (Active Connection)",
         "icon": "$(play)"
@@ -216,17 +248,17 @@
     "menus": {
       "view/title": [
         {
-          "command": "moreConnect.addConnection",
-          "when": "view == moreConnectConnections",
-          "group": "navigation"
-        },
-        {
-          "command": "moreConnect.addSshConnection",
-          "when": "view == moreConnectConnections",
-          "group": "navigation"
-        },
-        {
           "command": "moreConnect.importSshConfig",
+          "when": "view == moreConnectConnections",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.openInternalBrowser",
+          "when": "view == moreConnectConnections",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.openExternalBrowser",
           "when": "view == moreConnectConnections",
           "group": "navigation"
         },
@@ -242,6 +274,21 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "moreConnect.addConnection",
+          "when": "view == moreConnectConnections && viewItem == dbGroup",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.addSshConnection",
+          "when": "view == moreConnectConnections && viewItem == sshGroup",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.addWebLink",
+          "when": "view == moreConnectConnections && viewItem == webGroup",
+          "group": "inline"
+        },
         {
           "command": "moreConnect.newSql",
           "when": "view == moreConnectConnections && (viewItem == connection || viewItem == connectionConnected || viewItem == database || viewItem == table)",
@@ -304,6 +351,26 @@
           "group": "navigation"
         },
         {
+          "command": "moreConnect.openInternalBrowserFromLink",
+          "when": "view == moreConnectConnections && viewItem == webLink",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.openExternalBrowser",
+          "when": "view == moreConnectConnections && viewItem == webLink",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.editWebLink",
+          "when": "view == moreConnectConnections && viewItem == webLink",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.removeWebLink",
+          "when": "view == moreConnectConnections && viewItem == webLink",
+          "group": "navigation"
+        },
+        {
           "command": "moreConnect.removeConnection",
           "when": "view == moreConnectConnections && viewItem == connection",
           "group": "navigation"
@@ -359,6 +426,12 @@
         {
           "command": "moreConnect.runQuery",
           "when": "editorTextFocus"
+        },
+        {
+          "command": "moreConnect.openInternalBrowser"
+        },
+        {
+          "command": "moreConnect.openExternalBrowser"
         }
       ]
     },
@@ -382,5 +455,6 @@
     "mysql2": "^3.11.0",
     "pg": "^8.12.0",
     "ssh2": "^1.16.0"
-  }
+  },
+  "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }

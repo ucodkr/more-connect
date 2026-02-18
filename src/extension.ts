@@ -14,6 +14,7 @@ import { RedisClient } from "./db/redisClient";
 import { SshStore } from "./ssh/sshStore";
 import { parseSshConfig, readUserSshConfigText, sshConnectionsFromConfig } from "./ssh/sshConfig";
 import { TimeoutError, withTimeout } from "./utils/withTimeout";
+import { WebLinkStore } from "./web/webLinkStore";
 
 const SECRET_PREFIX = "moreConnect.password.";
 const SSH_SECRET_PREFIX = "moreConnect.sshPassword.";
@@ -42,6 +43,8 @@ export async function activate(context: vscode.ExtensionContext) {
   await store.init(context.globalState);
   const sshStore = new SshStore(context);
   await sshStore.init();
+  const webLinkStore = new WebLinkStore(context);
+  await webLinkStore.init();
   const output = vscode.window.createOutputChannel("More Connect");
   logStoragePaths(output, context, store);
   const resultsPanel = new ResultsPanel(context, async (msg) => {
@@ -127,6 +130,7 @@ export async function activate(context: vscode.ExtensionContext) {
   const view = new ExplorerView({
     listConnections: () => store.list(),
     listSshConnections: () => sshStore.list(),
+    listWebLinks: () => webLinkStore.list(),
     isConnected: (id) => {
       for (const [key, client] of clientsByKey.entries()) {
         if (key.startsWith(`${id}::`) && client.isConnected) return true;
@@ -164,6 +168,7 @@ export async function activate(context: vscode.ExtensionContext) {
         .map((n) => {
           if (n.kind === "connection") return { kind: "db", id: n.config.id };
           if (n.kind === "ssh") return { kind: "ssh", id: n.conn.id };
+          if (n.kind === "webLink") return { kind: "web", id: n.link.id };
           return;
         })
         .filter(Boolean);
@@ -173,7 +178,7 @@ export async function activate(context: vscode.ExtensionContext) {
     handleDrop: async (target, dataTransfer) => {
       const raw = dataTransfer.get(DND_MIME)?.value;
       if (typeof raw !== "string") return;
-      let dragged: Array<{ kind: "db" | "ssh"; id: string }> = [];
+      let dragged: Array<{ kind: "db" | "ssh" | "web"; id: string }> = [];
       try {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) dragged = parsed;
@@ -192,6 +197,8 @@ export async function activate(context: vscode.ExtensionContext) {
             ? "db"
             : target?.kind === "ssh"
               ? "ssh"
+              : target?.kind === "webLink"
+                ? "web"
               : undefined;
       if (!targetKind || targetKind !== dragKind) return;
 
@@ -200,9 +207,13 @@ export async function activate(context: vscode.ExtensionContext) {
           ? target?.kind === "connection"
             ? target.config.id
             : undefined
-          : target?.kind === "ssh"
-            ? target.conn.id
-            : undefined;
+          : dragKind === "ssh"
+            ? target?.kind === "ssh"
+              ? target.conn.id
+              : undefined
+            : target?.kind === "webLink"
+              ? target.link.id
+              : undefined;
 
       if (dragKind === "db") {
         const all = store.list();
@@ -212,7 +223,7 @@ export async function activate(context: vscode.ExtensionContext) {
         const idx = insertBeforeId ? remaining.findIndex((c) => c.id === insertBeforeId) : -1;
         const next = idx >= 0 ? [...remaining.slice(0, idx), ...moved, ...remaining.slice(idx)] : [...remaining, ...moved];
         await store.saveAll(next);
-      } else {
+      } else if (dragKind === "ssh") {
         const all = sshStore.list();
         const draggedIds = new Set(dragged.map((d) => d.id));
         const remaining = all.filter((c) => !draggedIds.has(c.id));
@@ -220,6 +231,14 @@ export async function activate(context: vscode.ExtensionContext) {
         const idx = insertBeforeId ? remaining.findIndex((c) => c.id === insertBeforeId) : -1;
         const next = idx >= 0 ? [...remaining.slice(0, idx), ...moved, ...remaining.slice(idx)] : [...remaining, ...moved];
         await sshStore.saveAll(next);
+      } else {
+        const all = webLinkStore.list();
+        const draggedIds = new Set(dragged.map((d) => d.id));
+        const remaining = all.filter((c) => !draggedIds.has(c.id));
+        const moved = all.filter((c) => draggedIds.has(c.id));
+        const idx = insertBeforeId ? remaining.findIndex((c) => c.id === insertBeforeId) : -1;
+        const next = idx >= 0 ? [...remaining.slice(0, idx), ...moved, ...remaining.slice(idx)] : [...remaining, ...moved];
+        await webLinkStore.saveAll(next);
       }
 
       view.refresh();
@@ -230,6 +249,39 @@ export async function activate(context: vscode.ExtensionContext) {
     treeDataProvider: view,
     dragAndDropController
   });
+  function normalizeHttpUrl(input: string): string | undefined {
+    const trimmed = input.trim();
+    if (!trimmed) return;
+    const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    try {
+      const parsed = vscode.Uri.parse(candidate, true);
+      if (!/^https?$/i.test(parsed.scheme)) return;
+      return parsed.toString(true);
+    } catch {
+      return;
+    }
+  }
+
+  async function pickOrPromptWebLink(node?: ExplorerNode): Promise<{ name: string; url: string } | undefined> {
+    if (node?.kind === "webLink") {
+      return { name: node.link.name, url: node.link.url };
+    }
+    const all = webLinkStore.list();
+    if (all.length === 0) {
+      vscode.window.showInformationMessage("No saved web links. Add one first.");
+      return;
+    }
+    const picked = await vscode.window.showQuickPick(
+      all.map((link) => ({ label: link.name, description: link.url, link })),
+      { title: "Select web link", ignoreFocusOut: true }
+    );
+    return picked ? { name: picked.link.name, url: picked.link.url } : undefined;
+  }
+
+  async function openInternalBrowser(url: string): Promise<void> {
+    await vscode.commands.executeCommand("simpleBrowser.show", url);
+  }
+
   context.subscriptions.push(
     treeView,
     output,
@@ -1264,7 +1316,9 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
           store.getFolderUri()
             ? vscode.Uri.joinPath(store.getFolderUri()!, "more-connect-connections.json").fsPath
             : "(n/a)"
-        }`
+        }`,
+        `sshFile(if set): ${vscode.Uri.joinPath(sshStore.getFolderUri(), "more-connect-ssh.json").fsPath}`,
+        `webLinksFile(if set): ${vscode.Uri.joinPath(webLinkStore.getFolderUri(), "more-connect-web-links.json").fsPath}`
       ].join("\n");
 
       const choice = await vscode.window.showInformationMessage(info, "Copy", "Open globalStorage");
@@ -1286,6 +1340,7 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
       if (!pick?.[0]) return;
       await store.setFolderUri(pick[0]);
       await sshStore.setFolderUri(pick[0]);
+      await webLinkStore.setFolderUri(pick[0]);
       vscode.window.showInformationMessage(
         `Connection storage: ${vscode.Uri.joinPath(pick[0], "more-connect-connections.json").fsPath}`
       );
@@ -1380,6 +1435,105 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
       if (!conn) return;
       await sshStore.saveAll(sshStore.list().filter((c) => c.id !== conn.id));
       view.refresh();
+    }),
+
+    vscode.commands.registerCommand("moreConnect.addWebLink", async () => {
+      const urlInput = await vscode.window.showInputBox({
+        title: "Add web link",
+        prompt: "Enter URL (http/https)",
+        ignoreFocusOut: true
+      });
+      if (urlInput === undefined) return;
+      const normalizedUrl = normalizeHttpUrl(urlInput);
+      if (!normalizedUrl) {
+        vscode.window.showErrorMessage("Invalid URL. Use http:// or https://");
+        return;
+      }
+      const name = await vscode.window.showInputBox({
+        title: "Link name",
+        prompt: "Display name in the Web Links view",
+        value: normalizedUrl,
+        ignoreFocusOut: true
+      });
+      if (!name?.trim()) return;
+      const next = [...webLinkStore.list(), { id: randomUUID(), name: name.trim(), url: normalizedUrl }];
+      await webLinkStore.saveAll(next);
+      view.refresh();
+    }),
+
+    vscode.commands.registerCommand("moreConnect.editWebLink", async (node?: ExplorerNode) => {
+      const link = node?.kind === "webLink" ? node.link : undefined;
+      if (!link) return;
+      const nextUrlInput = await vscode.window.showInputBox({
+        title: `Edit web link: ${link.name}`,
+        prompt: "URL (http/https)",
+        value: link.url,
+        ignoreFocusOut: true
+      });
+      if (nextUrlInput === undefined) return;
+      const normalizedUrl = normalizeHttpUrl(nextUrlInput);
+      if (!normalizedUrl) {
+        vscode.window.showErrorMessage("Invalid URL. Use http:// or https://");
+        return;
+      }
+      const nextName = await vscode.window.showInputBox({
+        title: `Edit web link: ${link.name}`,
+        prompt: "Display name in the Web Links view",
+        value: link.name,
+        ignoreFocusOut: true
+      });
+      if (nextName === undefined) return;
+      const updated = { ...link, name: nextName.trim() || link.name, url: normalizedUrl };
+      await webLinkStore.saveAll(webLinkStore.list().map((item) => (item.id === link.id ? updated : item)));
+      view.refresh();
+    }),
+
+    vscode.commands.registerCommand("moreConnect.removeWebLink", async (node?: ExplorerNode) => {
+      const link = node?.kind === "webLink" ? node.link : undefined;
+      if (!link) return;
+      await webLinkStore.saveAll(webLinkStore.list().filter((item) => item.id !== link.id));
+      view.refresh();
+    }),
+
+    vscode.commands.registerCommand("moreConnect.openInternalBrowser", async () => {
+      const urlInput = await vscode.window.showInputBox({
+        title: "Open internal browser",
+        prompt: "Enter URL (http/https)",
+        ignoreFocusOut: true
+      });
+      if (urlInput === undefined) return;
+      const normalizedUrl = normalizeHttpUrl(urlInput);
+      if (!normalizedUrl) {
+        vscode.window.showErrorMessage("Invalid URL. Use http:// or https://");
+        return;
+      }
+      await openInternalBrowser(normalizedUrl);
+    }),
+
+    vscode.commands.registerCommand("moreConnect.openInternalBrowserFromLink", async (node?: ExplorerNode) => {
+      const picked = await pickOrPromptWebLink(node);
+      if (!picked) return;
+      await openInternalBrowser(picked.url);
+    }),
+
+    vscode.commands.registerCommand("moreConnect.openExternalBrowser", async (node?: ExplorerNode) => {
+      const targetUrl = node?.kind === "webLink" ? node.link.url : undefined;
+      if (targetUrl) {
+        await vscode.env.openExternal(vscode.Uri.parse(targetUrl, true));
+        return;
+      }
+      const urlInput = await vscode.window.showInputBox({
+        title: "Open external browser",
+        prompt: "Enter URL (http/https)",
+        ignoreFocusOut: true
+      });
+      if (urlInput === undefined) return;
+      const normalizedUrl = normalizeHttpUrl(urlInput);
+      if (!normalizedUrl) {
+        vscode.window.showErrorMessage("Invalid URL. Use http:// or https://");
+        return;
+      }
+      await vscode.env.openExternal(vscode.Uri.parse(normalizedUrl, true));
     }),
 
     vscode.commands.registerCommand("moreConnect.addConnection", async () => {

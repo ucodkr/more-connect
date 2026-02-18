@@ -34,6 +34,12 @@ export type SshConnection = {
   identityFile?: string;
 };
 
+export type WebLink = {
+  id: string;
+  name: string;
+  url: string;
+};
+
 export type QueryResult = {
   columns: string[];
   rows: Array<Record<string, unknown>>;
