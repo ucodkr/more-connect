@@ -1,10 +1,12 @@
 import * as vscode from "vscode";
-import type { ConnectionConfig, OllamaEndpoint, SshConnection, WebLink } from "../types";
+import type { ConnectionConfig, OllamaEndpoint, SshConnection, VsCodeFavorite, WebLink } from "../types";
+
+export type ExplorerGroupName = "db" | "ssh" | "web" | "ollama" | "vscode";
 
 export type ExplorerNode =
   | {
       kind: "group";
-      group: "db" | "ssh" | "web" | "ollama";
+      group: ExplorerGroupName;
     }
   | {
       kind: "connection";
@@ -54,12 +56,17 @@ export type ExplorerNode =
       kind: "ollamaModel";
       endpointId: string;
       model: string;
+    }
+  | {
+      kind: "vscodeFavorite";
+      favorite: VsCodeFavorite;
     };
 
 export type ExplorerDataSource = {
   listConnections(): ConnectionConfig[];
   listSshConnections(): SshConnection[];
   listWebLinks(): WebLink[];
+  listVsCodeFavorites(): VsCodeFavorite[];
   listOllamaEndpoints(): OllamaEndpoint[];
   listOllamaModels(endpoint: OllamaEndpoint): Promise<string[]>;
   isConnected(id: string): boolean;
@@ -70,6 +77,7 @@ export type ExplorerDataSource = {
     connection: ConnectionConfig,
     database: string
   ): Promise<Array<{ name: string; schema?: string; type?: string }>>;
+  isGroupExpanded(group: ExplorerGroupName): boolean;
 };
 
 export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
@@ -92,8 +100,15 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
               ? "SSH Connections"
               : element.group === "web"
                 ? "Web Links"
+                : element.group === "vscode"
+                  ? "Folder/ Worksapce Favorites"
                 : "Ollama";
-        const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Expanded);
+        const item = new vscode.TreeItem(
+          label,
+          this.source.isGroupExpanded(element.group)
+            ? vscode.TreeItemCollapsibleState.Expanded
+            : vscode.TreeItemCollapsibleState.Collapsed
+        );
         item.contextValue =
           element.group === "db"
             ? "dbGroup"
@@ -101,6 +116,8 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
               ? "sshGroup"
               : element.group === "web"
                 ? "webGroup"
+                : element.group === "vscode"
+                  ? "vscodeGroup"
                 : "ollamaGroup";
         item.iconPath = new vscode.ThemeIcon(
           element.group === "db"
@@ -109,6 +126,8 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
               ? "terminal"
               : element.group === "web"
                 ? "globe"
+                : element.group === "vscode"
+                  ? "code"
                 : "hubot"
         );
         return item;
@@ -204,6 +223,19 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
         };
         return item;
       }
+      case "vscodeFavorite": {
+        const item = new vscode.TreeItem(element.favorite.name, vscode.TreeItemCollapsibleState.None);
+        item.contextValue = "vscodeFavorite";
+        item.description = element.favorite.kind === "workspace" ? ".code-workspace" : "folder";
+        item.tooltip = element.favorite.targetPath;
+        item.iconPath = new vscode.ThemeIcon(element.favorite.kind === "workspace" ? "file-submodule" : "folder");
+        item.command = {
+          command: "moreConnect.openVsCodeFavorite",
+          title: "Open in New VS Code",
+          arguments: [element]
+        };
+        return item;
+      }
     }
   }
 
@@ -213,6 +245,7 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
         { kind: "group", group: "db" },
         { kind: "group", group: "ssh" },
         { kind: "group", group: "web" },
+        { kind: "group", group: "vscode" },
         { kind: "group", group: "ollama" }
       ];
     }
@@ -233,6 +266,10 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
 
     if (element.kind === "group" && element.group === "web") {
       return this.source.listWebLinks().map((link) => ({ kind: "webLink", link }));
+    }
+
+    if (element.kind === "group" && element.group === "vscode") {
+      return this.source.listVsCodeFavorites().map((favorite) => ({ kind: "vscodeFavorite", favorite }));
     }
 
     if (element.kind === "group" && element.group === "ollama") {

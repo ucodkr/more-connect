@@ -46,6 +46,13 @@ export type OllamaEndpoint = {
   url: string;
 };
 
+export type VsCodeFavorite = {
+  id: string;
+  name: string;
+  targetPath: string;
+  kind: "folder" | "workspace";
+};
+
 export type QueryResult = {
   columns: string[];
   rows: Array<Record<string, unknown>>;

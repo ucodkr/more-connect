@@ -16,6 +16,8 @@ MySQL/MariaDB/PostgreSQL/SQLite/Oracle/Redis에 연결하고 쿼리를 실행하
 - Ollama 모델별 채팅 세션 저장 및 세션별 다시 불러오기
 - Ollama 채팅 응답 메타 표시 (입력 토큰/출력 토큰/처리시간)
 - Ollama 채팅 Markdown 렌더링 (헤더, 표, 코드블록, 링크, 리스트/인용)
+- VS Code 열기 즐겨찾기 (현재 워크스페이스/폴더/워크스페이스 파일/입력 경로 추가)
+- VS Code 즐겨찾기 수정/삭제 및 새 VS Code 창으로 열기
 
 ## Notes (Drivers)
 - `Redis`: 확장에 내장(추가 설치 불필요)

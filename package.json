@@ -27,6 +27,7 @@
   "activationEvents": [
     "onCommand:moreConnect.addConnection",
     "onCommand:moreConnect.addOllamaConnection",
+    "onCommand:moreConnect.addVsCodeFavorite",
     "onCommand:moreConnect.runQuery",
     "onCommand:moreConnect.openInternalBrowser",
     "onCommand:moreConnect.openExternalBrowser",
@@ -133,6 +134,36 @@
         "command": "moreConnect.addWebLink",
         "title": "More Connect: Add Web Link",
         "icon": "$(add)"
+      },
+      {
+        "command": "moreConnect.addVsCodeFavorite",
+        "title": "More Connect: Add VS Code Favorite",
+        "icon": "$(add)"
+      },
+      {
+        "command": "moreConnect.editVsCodeFavorite",
+        "title": "More Connect: Edit VS Code Favorite",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "moreConnect.removeVsCodeFavorite",
+        "title": "More Connect: Remove VS Code Favorite",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "moreConnect.openVsCodeFavorite",
+        "title": "More Connect: Open VS Code Favorite (New Window)",
+        "icon": "$(vscode)"
+      },
+      {
+        "command": "moreConnect.openVsCodeFavoriteInFinder",
+        "title": "More Connect: Open VS Code Favorite in Finder",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "moreConnect.openVsCodeFavoriteInTerminal",
+        "title": "More Connect: Open VS Code Favorite in Terminal",
+        "icon": "$(terminal)"
       },
       {
         "command": "moreConnect.editWebLink",
@@ -347,6 +378,11 @@
           "group": "inline"
         },
         {
+          "command": "moreConnect.addVsCodeFavorite",
+          "when": "view == moreConnectConnections && viewItem == vscodeGroup",
+          "group": "inline"
+        },
+        {
           "command": "moreConnect.addOllamaConnection",
           "when": "view == moreConnectConnections && viewItem == ollamaGroup",
           "group": "inline"
@@ -435,6 +471,31 @@
         {
           "command": "moreConnect.removeWebLink",
           "when": "view == moreConnectConnections && viewItem == webLink",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.openVsCodeFavorite",
+          "when": "view == moreConnectConnections && viewItem == vscodeFavorite",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.openVsCodeFavoriteInFinder",
+          "when": "view == moreConnectConnections && viewItem == vscodeFavorite",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.openVsCodeFavoriteInTerminal",
+          "when": "view == moreConnectConnections && viewItem == vscodeFavorite",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.editVsCodeFavorite",
+          "when": "view == moreConnectConnections && viewItem == vscodeFavorite",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.removeVsCodeFavorite",
+          "when": "view == moreConnectConnections && viewItem == vscodeFavorite",
           "group": "navigation"
         },
         {
@@ -547,6 +608,18 @@
         },
         {
           "command": "moreConnect.openBrowserDevTools"
+        },
+        {
+          "command": "moreConnect.addVsCodeFavorite"
+        },
+        {
+          "command": "moreConnect.openVsCodeFavorite"
+        },
+        {
+          "command": "moreConnect.openVsCodeFavoriteInFinder"
+        },
+        {
+          "command": "moreConnect.openVsCodeFavoriteInTerminal"
         },
         {
           "command": "moreConnect.ollamaChat"

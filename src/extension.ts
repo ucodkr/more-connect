@@ -1,14 +1,15 @@
 import * as vscode from "vscode";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import type { ConnectionConfig, DbType, OllamaEndpoint, QueryResult } from "./types";
+import * as path from "node:path";
+import type { ConnectionConfig, DbType, OllamaEndpoint, QueryResult, VsCodeFavorite } from "./types";
 import { ConnectionStore } from "./storage";
 import { createClient, type OptionalModuleLoader } from "./db/factory";
 import type { DbClient } from "./db/client";
 import { ResultsPanel } from "./ui/resultsPanel";
 import { InfoPanel } from "./ui/infoPanel";
 import { ConnectionWizard } from "./ui/connectionWizard";
-import { ExplorerView, type ExplorerNode } from "./ui/explorerView";
+import { ExplorerView, type ExplorerGroupName, type ExplorerNode } from "./ui/explorerView";
 import { OllamaChatPanel, type OllamaChatMessage } from "./ui/ollamaChatPanel";
 import { TunnelManager } from "./ssh/tunnelManager";
 import { RedisClient } from "./db/redisClient";
@@ -17,6 +18,7 @@ import { parseSshConfig, readUserSshConfigText, sshConnectionsFromConfig } from 
 import { TimeoutError, withTimeout } from "./utils/withTimeout";
 import { WebLinkStore } from "./web/webLinkStore";
 import { OllamaStore } from "./ollama/ollamaStore";
+import { VsCodeFavoriteStore } from "./vscode/vscodeFavoriteStore";
 
 const SECRET_PREFIX = "moreConnect.password.";
 const SSH_SECRET_PREFIX = "moreConnect.sshPassword.";
@@ -24,6 +26,7 @@ const ACTIVE_CONNECTION_KEY = "moreConnect.activeConnectionId";
 const SAVED_SQL_KEY = "moreConnect.savedSql.v1";
 const SQL_FILE_CONTEXT_KEY = "moreConnect.sqlFileContext.v1";
 const OLLAMA_SESSIONS_KEY = "moreConnect.ollamaSessions.v1";
+const EXPLORER_GROUP_STATE_KEY = "moreConnect.explorerGroupState.v1";
 
 type SavedSql = {
   id: string;
@@ -48,6 +51,8 @@ export async function activate(context: vscode.ExtensionContext) {
   await sshStore.init();
   const webLinkStore = new WebLinkStore(context);
   await webLinkStore.init();
+  const vsCodeFavoriteStore = new VsCodeFavoriteStore(context);
+  await vsCodeFavoriteStore.init();
   const ollamaStore = new OllamaStore(context);
   await ollamaStore.init();
   const output = vscode.window.createOutputChannel("More Connect");
@@ -121,6 +126,23 @@ export async function activate(context: vscode.ExtensionContext) {
     return activeDbByConnectionId.get(connectionId);
   }
 
+  function getExplorerGroupState(): Record<ExplorerGroupName, boolean> {
+    const saved = context.globalState.get<Partial<Record<ExplorerGroupName, boolean>>>(EXPLORER_GROUP_STATE_KEY, {});
+    return {
+      db: saved.db ?? true,
+      ssh: saved.ssh ?? true,
+      web: saved.web ?? true,
+      vscode: saved.vscode ?? true,
+      ollama: saved.ollama ?? true
+    };
+  }
+
+  async function setExplorerGroupExpanded(group: ExplorerGroupName, expanded: boolean): Promise<void> {
+    const next = getExplorerGroupState();
+    next[group] = expanded;
+    await context.globalState.update(EXPLORER_GROUP_STATE_KEY, next);
+  }
+
   function getSqlFileContext(uri: vscode.Uri): SqlFileContext | undefined {
     const all = context.globalState.get<Record<string, SqlFileContext>>(SQL_FILE_CONTEXT_KEY, {});
     return all[uri.toString()];
@@ -162,6 +184,7 @@ export async function activate(context: vscode.ExtensionContext) {
     listConnections: () => store.list(),
     listSshConnections: () => sshStore.list(),
     listWebLinks: () => webLinkStore.list(),
+    listVsCodeFavorites: () => vsCodeFavoriteStore.list(),
     listOllamaEndpoints: () => ollamaStore.list(),
     listOllamaModels: async (endpoint) => await fetchOllamaModels(endpoint),
     isConnected: (id) => {
@@ -189,7 +212,8 @@ export async function activate(context: vscode.ExtensionContext) {
       if (!client.isConnected) await connect({ ...config, database });
       if (!client.isConnected) return [];
       return await client.listTables(database);
-    }
+    },
+    isGroupExpanded: (group) => getExplorerGroupState()[group]
   });
 
   const DND_MIME = "application/vnd.more-connect.connection";
@@ -202,6 +226,7 @@ export async function activate(context: vscode.ExtensionContext) {
           if (n.kind === "connection") return { kind: "db", id: n.config.id };
           if (n.kind === "ssh") return { kind: "ssh", id: n.conn.id };
           if (n.kind === "webLink") return { kind: "web", id: n.link.id };
+          if (n.kind === "vscodeFavorite") return { kind: "vscode", id: n.favorite.id };
           if (n.kind === "ollama") return { kind: "ollama", id: n.endpoint.id };
           return;
         })
@@ -212,7 +237,7 @@ export async function activate(context: vscode.ExtensionContext) {
     handleDrop: async (target, dataTransfer) => {
       const raw = dataTransfer.get(DND_MIME)?.value;
       if (typeof raw !== "string") return;
-      let dragged: Array<{ kind: "db" | "ssh" | "web" | "ollama"; id: string }> = [];
+      let dragged: Array<{ kind: "db" | "ssh" | "web" | "vscode" | "ollama"; id: string }> = [];
       try {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) dragged = parsed;
@@ -233,6 +258,8 @@ export async function activate(context: vscode.ExtensionContext) {
               ? "ssh"
               : target?.kind === "webLink"
                 ? "web"
+                : target?.kind === "vscodeFavorite"
+                  ? "vscode"
                 : target?.kind === "ollama"
                   ? "ollama"
               : undefined;
@@ -251,6 +278,10 @@ export async function activate(context: vscode.ExtensionContext) {
               ? target?.kind === "webLink"
                 ? target.link.id
                 : undefined
+              : dragKind === "vscode"
+                ? target?.kind === "vscodeFavorite"
+                  ? target.favorite.id
+                  : undefined
               : target?.kind === "ollama"
                 ? target.endpoint.id
                 : undefined;
@@ -279,6 +310,14 @@ export async function activate(context: vscode.ExtensionContext) {
         const idx = insertBeforeId ? remaining.findIndex((c) => c.id === insertBeforeId) : -1;
         const next = idx >= 0 ? [...remaining.slice(0, idx), ...moved, ...remaining.slice(idx)] : [...remaining, ...moved];
         await webLinkStore.saveAll(next);
+      } else if (dragKind === "vscode") {
+        const all = vsCodeFavoriteStore.list();
+        const draggedIds = new Set(dragged.map((d) => d.id));
+        const remaining = all.filter((c) => !draggedIds.has(c.id));
+        const moved = all.filter((c) => draggedIds.has(c.id));
+        const idx = insertBeforeId ? remaining.findIndex((c) => c.id === insertBeforeId) : -1;
+        const next = idx >= 0 ? [...remaining.slice(0, idx), ...moved, ...remaining.slice(idx)] : [...remaining, ...moved];
+        await vsCodeFavoriteStore.saveAll(next);
       } else {
         const all = ollamaStore.list();
         const draggedIds = new Set(dragged.map((d) => d.id));
@@ -328,6 +367,98 @@ export async function activate(context: vscode.ExtensionContext) {
 
   async function openInternalBrowser(url: string): Promise<void> {
     await vscode.commands.executeCommand("simpleBrowser.show", url);
+  }
+
+  function normalizeUserPathInput(input: string): string | undefined {
+    const trimmed = input.trim().replace(/^['"]+|['"]+$/g, "");
+    return trimmed || undefined;
+  }
+
+  function buildVsCodeFavoriteName(targetPath: string): string {
+    const base = path.basename(targetPath);
+    return base || targetPath;
+  }
+
+  async function pathToVsCodeFavorite(rawPath: string): Promise<VsCodeFavorite | undefined> {
+    const targetPath = normalizeUserPathInput(rawPath);
+    if (!targetPath) return;
+    const targetUri = vscode.Uri.file(targetPath);
+    try {
+      const stat = await vscode.workspace.fs.stat(targetUri);
+      if ((stat.type & vscode.FileType.Directory) !== 0) {
+        return {
+          id: randomUUID(),
+          name: buildVsCodeFavoriteName(targetPath),
+          targetPath,
+          kind: "folder"
+        };
+      }
+      const lower = targetPath.toLowerCase();
+      if ((stat.type & vscode.FileType.File) !== 0 && lower.endsWith(".code-workspace")) {
+        return {
+          id: randomUUID(),
+          name: buildVsCodeFavoriteName(targetPath),
+          targetPath,
+          kind: "workspace"
+        };
+      }
+      vscode.window.showErrorMessage("Only folders and .code-workspace files are supported.");
+      return;
+    } catch {
+      vscode.window.showErrorMessage(`Path not found: ${targetPath}`);
+      return;
+    }
+  }
+
+  function currentWorkspaceToFavorite(): VsCodeFavorite | undefined {
+    const workspaceFile = vscode.workspace.workspaceFile;
+    if (workspaceFile?.scheme === "file") {
+      const targetPath = workspaceFile.fsPath;
+      return {
+        id: randomUUID(),
+        name: buildVsCodeFavoriteName(targetPath),
+        targetPath,
+        kind: "workspace"
+      };
+    }
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    if (!folder || folder.uri.scheme !== "file") return;
+    const targetPath = folder.uri.fsPath;
+    return {
+      id: randomUUID(),
+      name: buildVsCodeFavoriteName(targetPath),
+      targetPath,
+      kind: "folder"
+    };
+  }
+
+  async function pickVsCodeFavorite(node?: ExplorerNode): Promise<VsCodeFavorite | undefined> {
+    if (node?.kind === "vscodeFavorite") return node.favorite;
+    const all = vsCodeFavoriteStore.list();
+    if (all.length === 0) {
+      vscode.window.showInformationMessage("No VS Code favorites. Add one first.");
+      return;
+    }
+    const picked = await vscode.window.showQuickPick(
+      all.map((item) => ({
+        label: item.name,
+        description: item.kind,
+        detail: item.targetPath,
+        value: item
+      })),
+      { title: "Select VS Code favorite", ignoreFocusOut: true }
+    );
+    return picked?.value;
+  }
+
+  async function saveVsCodeFavorite(item: VsCodeFavorite): Promise<void> {
+    const all = vsCodeFavoriteStore.list();
+    if (all.some((x) => x.targetPath === item.targetPath && x.kind === item.kind)) {
+      vscode.window.showInformationMessage("Already in VS Code favorites.");
+      return;
+    }
+    await vsCodeFavoriteStore.saveAll([...all, item]);
+    view.refresh();
   }
 
   function normalizeOllamaUrl(input: string): string | undefined {
@@ -930,6 +1061,14 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     treeView,
     output,
+    treeView.onDidExpandElement(async (e) => {
+      if (e.element.kind !== "group") return;
+      await setExplorerGroupExpanded(e.element.group, true);
+    }),
+    treeView.onDidCollapseElement(async (e) => {
+      if (e.element.kind !== "group") return;
+      await setExplorerGroupExpanded(e.element.group, false);
+    }),
     treeView.onDidChangeSelection((e) => {
       const node = e.selection[0];
       if (!node) return;
@@ -1964,6 +2103,7 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
         }`,
         `sshFile(if set): ${vscode.Uri.joinPath(sshStore.getFolderUri(), "more-connect-ssh.json").fsPath}`,
         `webLinksFile(if set): ${vscode.Uri.joinPath(webLinkStore.getFolderUri(), "more-connect-web-links.json").fsPath}`,
+        `vscodeFavoritesFile(if set): ${vscode.Uri.joinPath(vsCodeFavoriteStore.getFolderUri(), "more-connect-vscode-favorites.json").fsPath}`,
         `ollamaFile(if set): ${vscode.Uri.joinPath(ollamaStore.getFolderUri(), "more-connect-ollama.json").fsPath}`
       ].join("\n");
 
@@ -1987,6 +2127,7 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
       await store.setFolderUri(pick[0]);
       await sshStore.setFolderUri(pick[0]);
       await webLinkStore.setFolderUri(pick[0]);
+      await vsCodeFavoriteStore.setFolderUri(pick[0]);
       await ollamaStore.setFolderUri(pick[0]);
       vscode.window.showInformationMessage(
         `Connection storage: ${vscode.Uri.joinPath(pick[0], "more-connect-connections.json").fsPath}`
@@ -2140,6 +2281,151 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
       if (!link) return;
       await webLinkStore.saveAll(webLinkStore.list().filter((item) => item.id !== link.id));
       view.refresh();
+    }),
+
+    vscode.commands.registerCommand("moreConnect.addVsCodeFavorite", async () => {
+      const source = await vscode.window.showQuickPick(
+        [
+          { label: "Current Workspace/Project", value: "current" as const },
+          { label: "Select Folder", value: "folder" as const },
+          { label: "Select Workspace File", value: "workspace" as const },
+          { label: "Input Path", value: "input" as const }
+        ],
+        { title: "Add VS Code favorite", ignoreFocusOut: true }
+      );
+      if (!source) return;
+
+      let item: VsCodeFavorite | undefined;
+      if (source.value === "current") {
+        item = currentWorkspaceToFavorite();
+        if (!item) {
+          vscode.window.showInformationMessage("No current workspace/project found.");
+          return;
+        }
+      } else if (source.value === "folder") {
+        const picked = await vscode.window.showOpenDialog({
+          title: "Select folder",
+          canSelectFiles: false,
+          canSelectFolders: true,
+          canSelectMany: false,
+          openLabel: "Add favorite"
+        });
+        if (!picked?.[0] || picked[0].scheme !== "file") return;
+        item = {
+          id: randomUUID(),
+          name: buildVsCodeFavoriteName(picked[0].fsPath),
+          targetPath: picked[0].fsPath,
+          kind: "folder"
+        };
+      } else if (source.value === "workspace") {
+        const picked = await vscode.window.showOpenDialog({
+          title: "Select .code-workspace file",
+          canSelectFiles: true,
+          canSelectFolders: false,
+          canSelectMany: false,
+          filters: { "VS Code Workspace": ["code-workspace"] },
+          openLabel: "Add favorite"
+        });
+        if (!picked?.[0] || picked[0].scheme !== "file") return;
+        item = {
+          id: randomUUID(),
+          name: buildVsCodeFavoriteName(picked[0].fsPath),
+          targetPath: picked[0].fsPath,
+          kind: "workspace"
+        };
+      } else {
+        const input = await vscode.window.showInputBox({
+          title: "Add VS Code favorite",
+          prompt: "Folder path or .code-workspace file path",
+          ignoreFocusOut: true
+        });
+        if (input === undefined) return;
+        item = await pathToVsCodeFavorite(input);
+      }
+      if (!item) return;
+
+      const nextName = await vscode.window.showInputBox({
+        title: "Favorite name",
+        prompt: "Display name in the VS Code favorites list",
+        value: item.name,
+        ignoreFocusOut: true
+      });
+      if (nextName === undefined) return;
+      item.name = nextName.trim() || item.name;
+      await saveVsCodeFavorite(item);
+    }),
+
+    vscode.commands.registerCommand("moreConnect.editVsCodeFavorite", async (node?: ExplorerNode) => {
+      const item = await pickVsCodeFavorite(node);
+      if (!item) return;
+
+      const nextPathInput = await vscode.window.showInputBox({
+        title: `Edit VS Code favorite: ${item.name}`,
+        prompt: "Folder path or .code-workspace file path",
+        value: item.targetPath,
+        ignoreFocusOut: true
+      });
+      if (nextPathInput === undefined) return;
+      const parsed = await pathToVsCodeFavorite(nextPathInput);
+      if (!parsed) return;
+
+      const nextName = await vscode.window.showInputBox({
+        title: `Edit VS Code favorite: ${item.name}`,
+        prompt: "Display name",
+        value: item.name,
+        ignoreFocusOut: true
+      });
+      if (nextName === undefined) return;
+
+      const updated: VsCodeFavorite = {
+        id: item.id,
+        kind: parsed.kind,
+        targetPath: parsed.targetPath,
+        name: nextName.trim() || item.name
+      };
+      await vsCodeFavoriteStore.saveAll(vsCodeFavoriteStore.list().map((x) => (x.id === item.id ? updated : x)));
+      view.refresh();
+    }),
+
+    vscode.commands.registerCommand("moreConnect.removeVsCodeFavorite", async (node?: ExplorerNode) => {
+      const item = await pickVsCodeFavorite(node);
+      if (!item) return;
+      const confirm = await vscode.window.showWarningMessage(
+        `Remove VS Code favorite "${item.name}"?`,
+        { modal: true },
+        "Remove"
+      );
+      if (confirm !== "Remove") return;
+      await vsCodeFavoriteStore.saveAll(vsCodeFavoriteStore.list().filter((x) => x.id !== item.id));
+      view.refresh();
+    }),
+
+    vscode.commands.registerCommand("moreConnect.openVsCodeFavorite", async (node?: ExplorerNode) => {
+      const item = await pickVsCodeFavorite(node);
+      if (!item) return;
+      const uri = vscode.Uri.file(item.targetPath);
+      await vscode.commands.executeCommand("vscode.openFolder", uri, {
+        forceNewWindow: true,
+        forceReuseWindow: false
+      });
+    }),
+
+    vscode.commands.registerCommand("moreConnect.openVsCodeFavoriteInFinder", async (node?: ExplorerNode) => {
+      const item = await pickVsCodeFavorite(node);
+      if (!item) return;
+      const uri = vscode.Uri.file(item.targetPath);
+      await vscode.commands.executeCommand("revealFileInOS", uri);
+    }),
+
+    vscode.commands.registerCommand("moreConnect.openVsCodeFavoriteInTerminal", async (node?: ExplorerNode) => {
+      const item = await pickVsCodeFavorite(node);
+      if (!item) return;
+      const cwd = item.kind === "workspace" ? path.dirname(item.targetPath) : item.targetPath;
+      const terminal = vscode.window.createTerminal({
+        name: `Folder: ${item.name}`,
+        cwd
+      });
+      terminal.show(true);
     }),
 
     vscode.commands.registerCommand("moreConnect.addOllamaConnection", async () => {
