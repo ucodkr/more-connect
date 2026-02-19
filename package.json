@@ -26,6 +26,7 @@
   ],
   "activationEvents": [
     "onCommand:moreConnect.addConnection",
+    "onCommand:moreConnect.addOllamaConnection",
     "onCommand:moreConnect.runQuery",
     "onCommand:moreConnect.openInternalBrowser",
     "onCommand:moreConnect.openExternalBrowser",
@@ -142,6 +143,51 @@
         "command": "moreConnect.removeWebLink",
         "title": "More Connect: Remove Web Link",
         "icon": "$(trash)"
+      },
+      {
+        "command": "moreConnect.addOllamaConnection",
+        "title": "More Connect: Add Ollama Endpoint",
+        "icon": "$(add)"
+      },
+      {
+        "command": "moreConnect.editOllamaConnection",
+        "title": "More Connect: Edit Ollama Endpoint",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "moreConnect.removeOllamaConnection",
+        "title": "More Connect: Remove Ollama Endpoint",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "moreConnect.refreshOllamaModels",
+        "title": "More Connect: Refresh Ollama Models",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "moreConnect.ollamaPullModel",
+        "title": "More Connect: Ollama Pull Model",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "moreConnect.ollamaDeleteModel",
+        "title": "More Connect: Ollama Delete Model",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "moreConnect.ollamaChat",
+        "title": "More Connect: Ollama Chat",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "moreConnect.copyOllamaModelName",
+        "title": "More Connect: Copy Ollama Model Name",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "moreConnect.showOllamaModelInfo",
+        "title": "More Connect: Show Ollama Model Info",
+        "icon": "$(info)"
       },
       {
         "command": "moreConnect.openInternalBrowser",
@@ -301,6 +347,11 @@
           "group": "inline"
         },
         {
+          "command": "moreConnect.addOllamaConnection",
+          "when": "view == moreConnectConnections && viewItem == ollamaGroup",
+          "group": "inline"
+        },
+        {
           "command": "moreConnect.newSql",
           "when": "view == moreConnectConnections && (viewItem == connection || viewItem == connectionConnected || viewItem == database || viewItem == table)",
           "group": "navigation"
@@ -387,6 +438,51 @@
           "group": "navigation"
         },
         {
+          "command": "moreConnect.ollamaChat",
+          "when": "view == moreConnectConnections && viewItem == ollamaConnection",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.refreshOllamaModels",
+          "when": "view == moreConnectConnections && viewItem == ollamaConnection",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.ollamaPullModel",
+          "when": "view == moreConnectConnections && viewItem == ollamaConnection",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.editOllamaConnection",
+          "when": "view == moreConnectConnections && viewItem == ollamaConnection",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.removeOllamaConnection",
+          "when": "view == moreConnectConnections && viewItem == ollamaConnection",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.ollamaChat",
+          "when": "view == moreConnectConnections && viewItem == ollamaModel",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.copyOllamaModelName",
+          "when": "view == moreConnectConnections && viewItem == ollamaModel",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.showOllamaModelInfo",
+          "when": "view == moreConnectConnections && viewItem == ollamaModel",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.ollamaDeleteModel",
+          "when": "view == moreConnectConnections && viewItem == ollamaModel",
+          "group": "navigation"
+        },
+        {
           "command": "moreConnect.removeConnection",
           "when": "view == moreConnectConnections && viewItem == connection",
           "group": "navigation"
@@ -451,6 +547,21 @@
         },
         {
           "command": "moreConnect.openBrowserDevTools"
+        },
+        {
+          "command": "moreConnect.ollamaChat"
+        },
+        {
+          "command": "moreConnect.ollamaPullModel"
+        },
+        {
+          "command": "moreConnect.ollamaDeleteModel"
+        },
+        {
+          "command": "moreConnect.copyOllamaModelName"
+        },
+        {
+          "command": "moreConnect.showOllamaModelInfo"
         }
       ]
     },

@@ -40,6 +40,12 @@ export type WebLink = {
   url: string;
 };
 
+export type OllamaEndpoint = {
+  id: string;
+  name: string;
+  url: string;
+};
+
 export type QueryResult = {
   columns: string[];
   rows: Array<Record<string, unknown>>;

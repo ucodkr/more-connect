@@ -1,10 +1,10 @@
 import * as vscode from "vscode";
-import type { ConnectionConfig, SshConnection, WebLink } from "../types";
+import type { ConnectionConfig, OllamaEndpoint, SshConnection, WebLink } from "../types";
 
 export type ExplorerNode =
   | {
       kind: "group";
-      group: "db" | "ssh" | "web";
+      group: "db" | "ssh" | "web" | "ollama";
     }
   | {
       kind: "connection";
@@ -45,12 +45,23 @@ export type ExplorerNode =
   | {
       kind: "webLink";
       link: WebLink;
+    }
+  | {
+      kind: "ollama";
+      endpoint: OllamaEndpoint;
+    }
+  | {
+      kind: "ollamaModel";
+      endpointId: string;
+      model: string;
     };
 
 export type ExplorerDataSource = {
   listConnections(): ConnectionConfig[];
   listSshConnections(): SshConnection[];
   listWebLinks(): WebLink[];
+  listOllamaEndpoints(): OllamaEndpoint[];
+  listOllamaModels(endpoint: OllamaEndpoint): Promise<string[]>;
   isConnected(id: string): boolean;
   getActiveConnectionId(): string | undefined;
   listDatabases(connection: ConnectionConfig): Promise<string[]>;
@@ -75,12 +86,30 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
     switch (element.kind) {
       case "group": {
         const label =
-          element.group === "db" ? "DB Connections" : element.group === "ssh" ? "SSH Connections" : "Web Links";
+          element.group === "db"
+            ? "DB Connections"
+            : element.group === "ssh"
+              ? "SSH Connections"
+              : element.group === "web"
+                ? "Web Links"
+                : "Ollama";
         const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Expanded);
         item.contextValue =
-          element.group === "db" ? "dbGroup" : element.group === "ssh" ? "sshGroup" : "webGroup";
+          element.group === "db"
+            ? "dbGroup"
+            : element.group === "ssh"
+              ? "sshGroup"
+              : element.group === "web"
+                ? "webGroup"
+                : "ollamaGroup";
         item.iconPath = new vscode.ThemeIcon(
-          element.group === "db" ? "database" : element.group === "ssh" ? "terminal" : "globe"
+          element.group === "db"
+            ? "database"
+            : element.group === "ssh"
+              ? "terminal"
+              : element.group === "web"
+                ? "globe"
+                : "hubot"
         );
         return item;
       }
@@ -156,6 +185,25 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
         };
         return item;
       }
+      case "ollama": {
+        const item = new vscode.TreeItem(element.endpoint.name, vscode.TreeItemCollapsibleState.Collapsed);
+        item.contextValue = "ollamaConnection";
+        item.description = element.endpoint.url;
+        item.tooltip = element.endpoint.url;
+        item.iconPath = new vscode.ThemeIcon("hubot");
+        return item;
+      }
+      case "ollamaModel": {
+        const item = new vscode.TreeItem(element.model, vscode.TreeItemCollapsibleState.None);
+        item.contextValue = "ollamaModel";
+        item.iconPath = new vscode.ThemeIcon("symbol-field");
+        item.command = {
+          command: "moreConnect.ollamaChat",
+          title: "Chat",
+          arguments: [element]
+        };
+        return item;
+      }
     }
   }
 
@@ -164,7 +212,8 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
       return [
         { kind: "group", group: "db" },
         { kind: "group", group: "ssh" },
-        { kind: "group", group: "web" }
+        { kind: "group", group: "web" },
+        { kind: "group", group: "ollama" }
       ];
     }
 
@@ -184,6 +233,15 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
 
     if (element.kind === "group" && element.group === "web") {
       return this.source.listWebLinks().map((link) => ({ kind: "webLink", link }));
+    }
+
+    if (element.kind === "group" && element.group === "ollama") {
+      return this.source.listOllamaEndpoints().map((endpoint) => ({ kind: "ollama", endpoint }));
+    }
+
+    if (element.kind === "ollama") {
+      const models = await this.source.listOllamaModels(element.endpoint);
+      return models.map((model) => ({ kind: "ollamaModel", endpointId: element.endpoint.id, model }));
     }
 
     if (element.kind === "connection") {

@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import type { ConnectionConfig, DbType } from "./types";
+import type { ConnectionConfig, DbType, OllamaEndpoint, QueryResult } from "./types";
 import { ConnectionStore } from "./storage";
 import { createClient, type OptionalModuleLoader } from "./db/factory";
 import type { DbClient } from "./db/client";
@@ -9,18 +9,21 @@ import { ResultsPanel } from "./ui/resultsPanel";
 import { InfoPanel } from "./ui/infoPanel";
 import { ConnectionWizard } from "./ui/connectionWizard";
 import { ExplorerView, type ExplorerNode } from "./ui/explorerView";
+import { OllamaChatPanel, type OllamaChatMessage } from "./ui/ollamaChatPanel";
 import { TunnelManager } from "./ssh/tunnelManager";
 import { RedisClient } from "./db/redisClient";
 import { SshStore } from "./ssh/sshStore";
 import { parseSshConfig, readUserSshConfigText, sshConnectionsFromConfig } from "./ssh/sshConfig";
 import { TimeoutError, withTimeout } from "./utils/withTimeout";
 import { WebLinkStore } from "./web/webLinkStore";
+import { OllamaStore } from "./ollama/ollamaStore";
 
 const SECRET_PREFIX = "moreConnect.password.";
 const SSH_SECRET_PREFIX = "moreConnect.sshPassword.";
 const ACTIVE_CONNECTION_KEY = "moreConnect.activeConnectionId";
 const SAVED_SQL_KEY = "moreConnect.savedSql.v1";
 const SQL_FILE_CONTEXT_KEY = "moreConnect.sqlFileContext.v1";
+const OLLAMA_SESSIONS_KEY = "moreConnect.ollamaSessions.v1";
 
 type SavedSql = {
   id: string;
@@ -45,7 +48,12 @@ export async function activate(context: vscode.ExtensionContext) {
   await sshStore.init();
   const webLinkStore = new WebLinkStore(context);
   await webLinkStore.init();
+  const ollamaStore = new OllamaStore(context);
+  await ollamaStore.init();
   const output = vscode.window.createOutputChannel("More Connect");
+  const ollamaChatPanel = new OllamaChatPanel(context, async (panelKey, msg) => {
+    await handleOllamaChatPanelMessage(panelKey, msg);
+  });
   logStoragePaths(output, context, store);
   const resultsPanel = new ResultsPanel(context, async (msg) => {
     await handleResultsPanelMessage(msg);
@@ -58,6 +66,29 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(sqlStatus);
 
   const activeDbByConnectionId = new Map<string, string>();
+  const ollamaChatsByKey = new Map<string, OllamaChatMessage[]>();
+  const ollamaAbortByPanelKey = new Map<string, AbortController>();
+  const ollamaPendingSessionByPanelKey = new Map<string, string>();
+
+  type OllamaModelInfo = {
+    name: string;
+    sizeBytes?: number;
+    parameterSize?: string;
+    quantization?: string;
+    contextLimit?: number;
+    family?: string;
+    format?: string;
+  };
+
+  type OllamaSession = {
+    id: string;
+    name: string;
+    endpointId: string;
+    model: string;
+    messages: OllamaChatMessage[];
+    createdAt: number;
+    updatedAt: number;
+  };
 
   const clientsByKey = new Map<string, DbClient>();
   const driverDir = vscode.Uri.joinPath(context.globalStorageUri, "drivers");
@@ -131,6 +162,8 @@ export async function activate(context: vscode.ExtensionContext) {
     listConnections: () => store.list(),
     listSshConnections: () => sshStore.list(),
     listWebLinks: () => webLinkStore.list(),
+    listOllamaEndpoints: () => ollamaStore.list(),
+    listOllamaModels: async (endpoint) => await fetchOllamaModels(endpoint),
     isConnected: (id) => {
       for (const [key, client] of clientsByKey.entries()) {
         if (key.startsWith(`${id}::`) && client.isConnected) return true;
@@ -169,6 +202,7 @@ export async function activate(context: vscode.ExtensionContext) {
           if (n.kind === "connection") return { kind: "db", id: n.config.id };
           if (n.kind === "ssh") return { kind: "ssh", id: n.conn.id };
           if (n.kind === "webLink") return { kind: "web", id: n.link.id };
+          if (n.kind === "ollama") return { kind: "ollama", id: n.endpoint.id };
           return;
         })
         .filter(Boolean);
@@ -178,7 +212,7 @@ export async function activate(context: vscode.ExtensionContext) {
     handleDrop: async (target, dataTransfer) => {
       const raw = dataTransfer.get(DND_MIME)?.value;
       if (typeof raw !== "string") return;
-      let dragged: Array<{ kind: "db" | "ssh" | "web"; id: string }> = [];
+      let dragged: Array<{ kind: "db" | "ssh" | "web" | "ollama"; id: string }> = [];
       try {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) dragged = parsed;
@@ -199,6 +233,8 @@ export async function activate(context: vscode.ExtensionContext) {
               ? "ssh"
               : target?.kind === "webLink"
                 ? "web"
+                : target?.kind === "ollama"
+                  ? "ollama"
               : undefined;
       if (!targetKind || targetKind !== dragKind) return;
 
@@ -211,9 +247,13 @@ export async function activate(context: vscode.ExtensionContext) {
             ? target?.kind === "ssh"
               ? target.conn.id
               : undefined
-            : target?.kind === "webLink"
-              ? target.link.id
-              : undefined;
+            : dragKind === "web"
+              ? target?.kind === "webLink"
+                ? target.link.id
+                : undefined
+              : target?.kind === "ollama"
+                ? target.endpoint.id
+                : undefined;
 
       if (dragKind === "db") {
         const all = store.list();
@@ -231,7 +271,7 @@ export async function activate(context: vscode.ExtensionContext) {
         const idx = insertBeforeId ? remaining.findIndex((c) => c.id === insertBeforeId) : -1;
         const next = idx >= 0 ? [...remaining.slice(0, idx), ...moved, ...remaining.slice(idx)] : [...remaining, ...moved];
         await sshStore.saveAll(next);
-      } else {
+      } else if (dragKind === "web") {
         const all = webLinkStore.list();
         const draggedIds = new Set(dragged.map((d) => d.id));
         const remaining = all.filter((c) => !draggedIds.has(c.id));
@@ -239,6 +279,14 @@ export async function activate(context: vscode.ExtensionContext) {
         const idx = insertBeforeId ? remaining.findIndex((c) => c.id === insertBeforeId) : -1;
         const next = idx >= 0 ? [...remaining.slice(0, idx), ...moved, ...remaining.slice(idx)] : [...remaining, ...moved];
         await webLinkStore.saveAll(next);
+      } else {
+        const all = ollamaStore.list();
+        const draggedIds = new Set(dragged.map((d) => d.id));
+        const remaining = all.filter((c) => !draggedIds.has(c.id));
+        const moved = all.filter((c) => draggedIds.has(c.id));
+        const idx = insertBeforeId ? remaining.findIndex((c) => c.id === insertBeforeId) : -1;
+        const next = idx >= 0 ? [...remaining.slice(0, idx), ...moved, ...remaining.slice(idx)] : [...remaining, ...moved];
+        await ollamaStore.saveAll(next);
       }
 
       view.refresh();
@@ -280,6 +328,603 @@ export async function activate(context: vscode.ExtensionContext) {
 
   async function openInternalBrowser(url: string): Promise<void> {
     await vscode.commands.executeCommand("simpleBrowser.show", url);
+  }
+
+  function normalizeOllamaUrl(input: string): string | undefined {
+    const trimmed = input.trim();
+    if (!trimmed) return;
+    const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+    try {
+      const parsed = vscode.Uri.parse(candidate, true);
+      if (!/^https?$/i.test(parsed.scheme) || !parsed.authority) return;
+      const normalized = `${parsed.scheme}://${parsed.authority}${parsed.path}`.replace(/\/+$/, "");
+      return normalized || `${parsed.scheme}://${parsed.authority}`;
+    } catch {
+      return;
+    }
+  }
+
+  async function fetchOllamaJson(
+    endpoint: OllamaEndpoint,
+    path: string,
+    init?: RequestInit
+  ): Promise<any> {
+    const url = `${endpoint.url}${path.startsWith("/") ? path : `/${path}`}`;
+    const res = await fetch(url, {
+      method: init?.method ?? "GET",
+      headers: {
+        "content-type": "application/json",
+        ...(init?.headers ?? {})
+      },
+      body: init?.body,
+      signal: init?.signal
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`HTTP ${res.status}${text ? `: ${text.slice(0, 160)}` : ""}`);
+    }
+    const text = await res.text().catch(() => "");
+    if (!text.trim()) return {};
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { raw: text };
+    }
+  }
+
+  async function fetchOllamaModels(endpoint: OllamaEndpoint): Promise<string[]> {
+    const models = await fetchOllamaTagModels(endpoint);
+    const names = models
+      .map((m: any) => String(m?.name ?? m?.model ?? "").trim())
+      .filter(Boolean)
+      .sort((a: string, b: string) => a.localeCompare(b));
+    return Array.from(new Set(names.values()));
+  }
+
+  async function fetchOllamaTagModels(endpoint: OllamaEndpoint): Promise<any[]> {
+    const payload = await fetchOllamaJson(endpoint, "/api/tags");
+    return Array.isArray(payload?.models) ? payload.models : [];
+  }
+
+  function parseContextLimitFromShow(payload: any): number | undefined {
+    const obj = payload?.model_info;
+    if (obj && typeof obj === "object") {
+      const entries = Object.entries(obj as Record<string, unknown>);
+      for (const [k, v] of entries) {
+        const key = String(k).toLowerCase();
+        if (
+          key.includes("context_length") ||
+          key.includes("num_ctx") ||
+          key.includes("n_ctx") ||
+          key.includes("max_position_embeddings")
+        ) {
+          const n = Number(v);
+          if (Number.isFinite(n) && n > 0) return Math.trunc(n);
+        }
+      }
+    }
+    const parameters = String(payload?.parameters ?? "");
+    const m = parameters.match(/\bnum_ctx\s+(\d+)\b/i);
+    if (m?.[1]) return Number(m[1]);
+    return;
+  }
+
+  function toOllamaModelInfo(tag: any): OllamaModelInfo {
+    return {
+      name: String(tag?.name ?? ""),
+      sizeBytes: toNumberOrUndefined(tag?.size),
+      parameterSize: String(tag?.details?.parameter_size ?? "").trim() || undefined,
+      quantization: String(tag?.details?.quantization_level ?? "").trim() || undefined,
+      family: String(tag?.details?.family ?? "").trim() || undefined,
+      format: String(tag?.details?.format ?? "").trim() || undefined
+    };
+  }
+
+  async function fetchOllamaModelInfoMap(
+    endpoint: OllamaEndpoint
+  ): Promise<Record<string, OllamaModelInfo>> {
+    const tags = await fetchOllamaTagModels(endpoint);
+    const map: Record<string, OllamaModelInfo> = {};
+    for (const t of tags) {
+      const name = String(t?.name ?? t?.model ?? "").trim();
+      if (!name) continue;
+      map[name] = toOllamaModelInfo(t);
+    }
+    return map;
+  }
+
+  async function enrichOllamaModelContextLimit(
+    endpoint: OllamaEndpoint,
+    model: string,
+    base: OllamaModelInfo | undefined
+  ): Promise<OllamaModelInfo> {
+    const info: OllamaModelInfo = { ...(base ?? { name: model }), name: model };
+    try {
+      const show = await fetchOllamaJson(endpoint, "/api/show", {
+        method: "POST",
+        body: JSON.stringify({ model })
+      });
+      const limit = parseContextLimitFromShow(show);
+      if (limit !== undefined) info.contextLimit = limit;
+    } catch {}
+    return info;
+  }
+
+  async function pickOllamaEndpoint(node?: ExplorerNode): Promise<OllamaEndpoint | undefined> {
+    if (node?.kind === "ollama") return node.endpoint;
+    if (node?.kind === "ollamaModel") {
+      return ollamaStore.list().find((item) => item.id === node.endpointId);
+    }
+    const all = ollamaStore.list();
+    if (all.length === 0) {
+      vscode.window.showInformationMessage("No Ollama endpoint. Add one first.");
+      return;
+    }
+    const picked = await vscode.window.showQuickPick(
+      all.map((item) => ({ label: item.name, description: item.url, endpoint: item })),
+      { title: "Select Ollama endpoint", ignoreFocusOut: true }
+    );
+    return picked?.endpoint;
+  }
+
+  async function pickOllamaModel(endpoint: OllamaEndpoint, preselected?: string): Promise<string | undefined> {
+    const models = await fetchOllamaModels(endpoint);
+    if (models.length === 0) {
+      vscode.window.showInformationMessage(`No models on ${endpoint.name}. Pull a model first.`);
+      return;
+    }
+    const picked = await vscode.window.showQuickPick(
+      models.map((model) => ({ label: model, picked: model === preselected })),
+      { title: `Select model (${endpoint.name})`, ignoreFocusOut: true }
+    );
+    return picked?.label;
+  }
+
+  function ollamaChatKey(endpointId: string, model: string): string {
+    return `${endpointId}::${model}`;
+  }
+
+  function ollamaPanelKey(endpointId: string): string {
+    return endpointId;
+  }
+
+  function ollamaSessionScopeKey(endpointId: string, model: string): string {
+    return `${endpointId}::${model}`;
+  }
+
+  function listOllamaSessions(endpointId: string, model: string): OllamaSession[] {
+    const all = context.globalState.get<Record<string, OllamaSession[]>>(OLLAMA_SESSIONS_KEY, {});
+    const key = ollamaSessionScopeKey(endpointId, model);
+    const sessions = Array.isArray(all[key]) ? all[key] : [];
+    return sessions
+      .filter((s) => s.endpointId === endpointId && s.model === model)
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  async function saveOllamaSessions(endpointId: string, model: string, sessions: OllamaSession[]): Promise<void> {
+    const all = context.globalState.get<Record<string, OllamaSession[]>>(OLLAMA_SESSIONS_KEY, {});
+    const key = ollamaSessionScopeKey(endpointId, model);
+    all[key] = sessions
+      .slice()
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, 50);
+    await context.globalState.update(OLLAMA_SESSIONS_KEY, all);
+  }
+
+  function buildOllamaSessionName(messages: OllamaChatMessage[], fallback: string): string {
+    const firstUser = messages.find((m) => m.role === "user" && String(m.content ?? "").trim());
+    if (!firstUser) return fallback;
+    const title = String(firstUser.content ?? "").replaceAll(/\s+/g, " ").trim();
+    return title.length > 40 ? `${title.slice(0, 40)}...` : title;
+  }
+
+  async function upsertOllamaSession(
+    endpointId: string,
+    model: string,
+    sessionId: string,
+    messages: OllamaChatMessage[]
+  ): Promise<OllamaSession> {
+    const now = Date.now();
+    const all = listOllamaSessions(endpointId, model);
+    const idx = all.findIndex((s) => s.id === sessionId);
+    if (idx >= 0) {
+      const current = all[idx];
+      const updated: OllamaSession = {
+        ...current,
+        messages,
+        updatedAt: now,
+        name: buildOllamaSessionName(messages, current.name)
+      };
+      all[idx] = updated;
+      await saveOllamaSessions(endpointId, model, all);
+      return updated;
+    }
+    const created: OllamaSession = {
+      id: sessionId,
+      endpointId,
+      model,
+      messages,
+      createdAt: now,
+      updatedAt: now,
+      name: buildOllamaSessionName(messages, `Session ${new Date(now).toLocaleString()}`)
+    };
+    all.unshift(created);
+    await saveOllamaSessions(endpointId, model, all);
+    return created;
+  }
+
+  function toNumberOrUndefined(v: unknown): number | undefined {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  }
+
+  function ollamaMetaFromChatResponse(result: any): OllamaChatMessage["meta"] {
+    const inputTokens = toNumberOrUndefined(result?.prompt_eval_count);
+    const outputTokens = toNumberOrUndefined(result?.eval_count);
+    const totalDurationNs = toNumberOrUndefined(result?.total_duration);
+    const evalDurationNs = toNumberOrUndefined(result?.eval_duration);
+    const totalMs = totalDurationNs !== undefined ? totalDurationNs / 1_000_000 : undefined;
+    const tokensPerSec =
+      outputTokens !== undefined && evalDurationNs !== undefined && evalDurationNs > 0
+        ? outputTokens / (evalDurationNs / 1_000_000_000)
+        : undefined;
+    return { inputTokens, outputTokens, totalMs, tokensPerSec };
+  }
+
+  async function streamOllamaChat(
+    endpoint: OllamaEndpoint,
+    body: { model: string; messages: OllamaChatMessage[] },
+    panelKey: string,
+    signal: AbortSignal
+  ): Promise<{ content: string; finalChunk?: any }> {
+    const url = `${endpoint.url}/api/chat`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...body, stream: true }),
+      signal
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`HTTP ${res.status}${text ? `: ${text.slice(0, 160)}` : ""}`);
+    }
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error("No response body");
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let content = "";
+    let finalChunk: any;
+
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let nl = buffer.indexOf("\n");
+        while (nl >= 0) {
+          const line = buffer.slice(0, nl).trim();
+          buffer = buffer.slice(nl + 1);
+          if (line) {
+            try {
+              const chunk = JSON.parse(line);
+              const delta = String(chunk?.message?.content ?? "");
+              if (delta) {
+                content += delta;
+                ollamaChatPanel.postMessage(panelKey, { type: "ollama.streamDelta", delta });
+              }
+              if (chunk?.done) finalChunk = chunk;
+            } catch {}
+          }
+          nl = buffer.indexOf("\n");
+        }
+      }
+    } catch (e) {
+      (e as any).partialContent = content;
+      throw e;
+    }
+
+    const tail = (buffer + decoder.decode()).trim();
+    if (tail) {
+      try {
+        const chunk = JSON.parse(tail);
+        const delta = String(chunk?.message?.content ?? "");
+        if (delta) {
+          content += delta;
+          ollamaChatPanel.postMessage(panelKey, { type: "ollama.streamDelta", delta });
+        }
+        if (chunk?.done) finalChunk = chunk;
+      } catch {}
+    }
+
+    return { content, finalChunk };
+  }
+
+  async function showOllamaChat(endpoint: OllamaEndpoint, model: string): Promise<void> {
+    let models: string[] = [];
+    let modelInfos: Record<string, OllamaModelInfo> = {};
+    try {
+      models = await fetchOllamaModels(endpoint);
+    } catch {}
+    try {
+      modelInfos = await fetchOllamaModelInfoMap(endpoint);
+      modelInfos[model] = await enrichOllamaModelContextLimit(endpoint, model, modelInfos[model]);
+    } catch {}
+    if (!models.includes(model)) models = [...models, model];
+    const sessions = listOllamaSessions(endpoint.id, model);
+    const selectedSession = sessions[0];
+    const key = ollamaChatKey(endpoint.id, model);
+    const messages = selectedSession?.messages ?? ollamaChatsByKey.get(key) ?? [];
+    if (messages.length > 0) ollamaChatsByKey.set(key, messages);
+    ollamaChatPanel.show(ollamaPanelKey(endpoint.id), {
+      endpointId: endpoint.id,
+      endpointName: endpoint.name,
+      endpointUrl: endpoint.url,
+      model,
+      models,
+      modelInfos,
+      sessionId: selectedSession?.id,
+      sessions: sessions.map((s) => ({ id: s.id, name: s.name, updatedAt: s.updatedAt })),
+      messages
+    });
+  }
+
+  async function handleOllamaChatPanelMessage(panelKey: string, msg: any): Promise<void> {
+    if (!msg || typeof msg !== "object") return;
+
+    if (msg.type === "ollama.stop") {
+      const ctrl = ollamaAbortByPanelKey.get(panelKey);
+      if (ctrl) ctrl.abort();
+      return;
+    }
+
+    if (msg.type === "ollama.listModels") {
+      const endpointId = String(msg.endpointId ?? "");
+      const currentModel = String(msg.model ?? "").trim();
+      if (!endpointId) return;
+      const endpoint = ollamaStore.list().find((item) => item.id === endpointId);
+      if (!endpoint) return;
+      try {
+        const models = await fetchOllamaModels(endpoint);
+        const mergedModels = currentModel && !models.includes(currentModel) ? [...models, currentModel] : models;
+        let modelInfos: Record<string, OllamaModelInfo> = {};
+        try {
+          modelInfos = await fetchOllamaModelInfoMap(endpoint);
+          if (currentModel) {
+            modelInfos[currentModel] = await enrichOllamaModelContextLimit(endpoint, currentModel, modelInfos[currentModel]);
+          }
+        } catch {}
+        ollamaChatPanel.postMessage(panelKey, { type: "ollama.setModels", models: mergedModels, modelInfos });
+        const sessions = listOllamaSessions(endpointId, currentModel || mergedModels[0] || "");
+        ollamaChatPanel.postMessage(panelKey, {
+          type: "ollama.setSessions",
+          sessionId: sessions[0]?.id,
+          sessions: sessions.map((s) => ({ id: s.id, name: s.name, updatedAt: s.updatedAt }))
+        });
+      } catch (e) {
+        const fallbackModels = currentModel ? [currentModel] : [];
+        ollamaChatPanel.postMessage(panelKey, { type: "ollama.setModels", models: fallbackModels, modelInfos: {} });
+        if (!currentModel) {
+          ollamaChatPanel.postMessage(panelKey, {
+            type: "ollama.error",
+            message: `Model list failed: ${(e as Error).message}`
+          });
+        }
+      }
+      return;
+    }
+
+    if (msg.type === "ollama.listSessions") {
+      const endpointId = String(msg.endpointId ?? "");
+      const model = String(msg.model ?? "").trim();
+      if (!endpointId || !model) return;
+      const sessions = listOllamaSessions(endpointId, model);
+      ollamaChatPanel.postMessage(panelKey, {
+        type: "ollama.setSessions",
+        sessionId: sessions[0]?.id,
+        sessions: sessions.map((s) => ({ id: s.id, name: s.name, updatedAt: s.updatedAt }))
+      });
+      return;
+    }
+
+    if (msg.type === "ollama.createSession") {
+      const endpointId = String(msg.endpointId ?? "");
+      const model = String(msg.model ?? "").trim();
+      if (!endpointId || !model) return;
+      const id = randomUUID();
+      ollamaPendingSessionByPanelKey.set(panelKey, id);
+      const created = await upsertOllamaSession(endpointId, model, id, []);
+      const sessions = listOllamaSessions(endpointId, model);
+      ollamaChatPanel.postMessage(panelKey, {
+        type: "ollama.setSessions",
+        sessionId: created.id,
+        sessions: sessions.map((s) => ({ id: s.id, name: s.name, updatedAt: s.updatedAt }))
+      });
+      ollamaChatPanel.postMessage(panelKey, { type: "ollama.setConversation", model, sessionId: created.id, messages: [] });
+      return;
+    }
+
+    if (msg.type === "ollama.selectSession") {
+      const endpointId = String(msg.endpointId ?? "");
+      const model = String(msg.model ?? "").trim();
+      const sessionId = String(msg.sessionId ?? "").trim();
+      if (!endpointId || !model || !sessionId) return;
+      ollamaPendingSessionByPanelKey.delete(panelKey);
+      const session = listOllamaSessions(endpointId, model).find((s) => s.id === sessionId);
+      ollamaChatPanel.postMessage(panelKey, {
+        type: "ollama.setConversation",
+        model,
+        sessionId,
+        messages: session?.messages ?? []
+      });
+      if (session) {
+        ollamaChatsByKey.set(ollamaChatKey(endpointId, model), session.messages);
+      }
+      return;
+    }
+
+    if (msg.type === "ollama.deleteSession") {
+      const endpointId = String(msg.endpointId ?? "");
+      const model = String(msg.model ?? "").trim();
+      const sessionId = String(msg.sessionId ?? "").trim();
+      if (!endpointId || !model || !sessionId) return;
+      ollamaPendingSessionByPanelKey.delete(panelKey);
+      const sessions = listOllamaSessions(endpointId, model).filter((s) => s.id !== sessionId);
+      await saveOllamaSessions(endpointId, model, sessions);
+      const nextSession = sessions[0];
+      const nextMessages = nextSession?.messages ?? [];
+      if (nextSession) {
+        ollamaChatsByKey.set(ollamaChatKey(endpointId, model), nextMessages);
+      } else {
+        ollamaChatsByKey.delete(ollamaChatKey(endpointId, model));
+      }
+      ollamaChatPanel.postMessage(panelKey, {
+        type: "ollama.setSessions",
+        sessionId: nextSession?.id,
+        sessions: sessions.map((s) => ({ id: s.id, name: s.name, updatedAt: s.updatedAt }))
+      });
+      ollamaChatPanel.postMessage(panelKey, {
+        type: "ollama.setConversation",
+        model,
+        sessionId: nextSession?.id,
+        messages: nextMessages
+      });
+      return;
+    }
+
+    if (msg.type === "ollama.clear") {
+      const ctrl = ollamaAbortByPanelKey.get(panelKey);
+      if (ctrl) ctrl.abort();
+      const endpointId = String(msg.endpointId ?? "");
+      const model = String(msg.model ?? "");
+      const sessionId = String(msg.sessionId ?? "").trim();
+      if (!endpointId || !model) return;
+      ollamaChatsByKey.delete(ollamaChatKey(endpointId, model));
+      if (sessionId) await upsertOllamaSession(endpointId, model, sessionId, []);
+      return;
+    }
+
+    if (msg.type === "ollama.switchModel") {
+      const ctrl = ollamaAbortByPanelKey.get(panelKey);
+      if (ctrl) ctrl.abort();
+      ollamaPendingSessionByPanelKey.delete(panelKey);
+      const endpointId = String(msg.endpointId ?? "");
+      const model = String(msg.model ?? "").trim();
+      if (!endpointId || !model) return;
+      const endpoint = ollamaStore.list().find((item) => item.id === endpointId);
+      if (!endpoint) {
+        ollamaChatPanel.postMessage(panelKey, { type: "ollama.error", message: "Ollama endpoint not found." });
+        return;
+      }
+      const messages = ollamaChatsByKey.get(ollamaChatKey(endpoint.id, model)) ?? [];
+      const sessions = listOllamaSessions(endpoint.id, model);
+      const selectedSessionId = sessions[0]?.id;
+      const sessionMessages = selectedSessionId
+        ? sessions.find((s) => s.id === selectedSessionId)?.messages ?? messages
+        : messages;
+      let models: string[] = [];
+      let modelInfos: Record<string, OllamaModelInfo> = {};
+      try {
+        models = await fetchOllamaModels(endpoint);
+      } catch {}
+      try {
+        modelInfos = await fetchOllamaModelInfoMap(endpoint);
+        modelInfos[model] = await enrichOllamaModelContextLimit(endpoint, model, modelInfos[model]);
+      } catch {}
+      if (!models.includes(model)) models = [...models, model];
+      ollamaChatPanel.postMessage(panelKey, {
+        type: "ollama.setConversation",
+        model,
+        sessionId: selectedSessionId,
+        messages: sessionMessages,
+        models,
+        modelInfos
+      });
+      ollamaChatPanel.postMessage(panelKey, {
+        type: "ollama.setSessions",
+        sessionId: selectedSessionId,
+        sessions: sessions.map((s) => ({ id: s.id, name: s.name, updatedAt: s.updatedAt }))
+      });
+      return;
+    }
+
+    if (msg.type !== "ollama.send") return;
+
+    const endpointId = String(msg.endpointId ?? "");
+    const model = String(msg.model ?? "");
+    const requestedSessionId = String(msg.sessionId ?? "").trim();
+    const pendingSessionId = ollamaPendingSessionByPanelKey.get(panelKey);
+    const sessionId = pendingSessionId || requestedSessionId || randomUUID();
+    if (pendingSessionId) ollamaPendingSessionByPanelKey.delete(panelKey);
+    const prompt = String(msg.prompt ?? "").trim();
+    if (!endpointId || !model || !prompt) return;
+
+    const endpoint = ollamaStore.list().find((item) => item.id === endpointId);
+    if (!endpoint) {
+      ollamaChatPanel.postMessage(panelKey, { type: "ollama.error", message: "Ollama endpoint not found." });
+      return;
+    }
+
+    const key = ollamaChatKey(endpoint.id, model);
+    const foundSession = listOllamaSessions(endpoint.id, model).find((s) => s.id === sessionId);
+    const previousFromSession = foundSession?.messages ?? [];
+    // If a specific session is selected (even empty), never fall back to another session's history.
+    const previous = foundSession ? previousFromSession : ollamaChatsByKey.get(key) ?? [];
+    const requestMessages: OllamaChatMessage[] = [...previous, { role: "user", content: prompt }];
+    ollamaChatsByKey.set(key, requestMessages.slice(-40));
+
+    const existingCtrl = ollamaAbortByPanelKey.get(panelKey);
+    if (existingCtrl) existingCtrl.abort();
+    const ctrl = new AbortController();
+    ollamaAbortByPanelKey.set(panelKey, ctrl);
+    ollamaChatPanel.postMessage(panelKey, { type: "ollama.streamStart" });
+
+    try {
+      const { content, finalChunk } = await streamOllamaChat(
+        endpoint,
+        { model, messages: requestMessages },
+        panelKey,
+        ctrl.signal
+      );
+      const answer = String(content ?? "").trim();
+      if (!answer) throw new Error("Empty response");
+      const assistantMessage: OllamaChatMessage = {
+        role: "assistant",
+        content: answer,
+        meta: ollamaMetaFromChatResponse(finalChunk ?? {})
+      };
+      const nextMessages: OllamaChatMessage[] = [...requestMessages, assistantMessage];
+      ollamaChatsByKey.set(key, nextMessages.slice(-40));
+      await upsertOllamaSession(endpoint.id, model, sessionId, nextMessages.slice(-40));
+      const sessions = listOllamaSessions(endpoint.id, model);
+      ollamaChatPanel.postMessage(panelKey, { type: "ollama.streamDone", message: assistantMessage });
+      ollamaChatPanel.postMessage(panelKey, {
+        type: "ollama.setSessions",
+        sessionId,
+        sessions: sessions.map((s) => ({ id: s.id, name: s.name, updatedAt: s.updatedAt }))
+      });
+    } catch (e) {
+      const isAbort = ctrl.signal.aborted || (e as Error).name === "AbortError";
+      if (isAbort) {
+        const partialContent = String(((e as any)?.partialContent ?? "") || "").trim();
+        if (partialContent) {
+          const assistantMessage: OllamaChatMessage = { role: "assistant", content: partialContent };
+          const nextMessages: OllamaChatMessage[] = [...requestMessages, assistantMessage];
+          ollamaChatsByKey.set(key, nextMessages.slice(-40));
+          await upsertOllamaSession(endpoint.id, model, sessionId, nextMessages.slice(-40));
+          ollamaChatPanel.postMessage(panelKey, { type: "ollama.streamDone", message: assistantMessage, stopped: true });
+        } else {
+          await upsertOllamaSession(endpoint.id, model, sessionId, requestMessages.slice(-40));
+          ollamaChatPanel.postMessage(panelKey, { type: "ollama.streamDone", stopped: true });
+        }
+      } else {
+        ollamaChatPanel.postMessage(panelKey, { type: "ollama.error", message: (e as Error).message });
+      }
+    } finally {
+      if (ollamaAbortByPanelKey.get(panelKey) === ctrl) {
+        ollamaAbortByPanelKey.delete(panelKey);
+      }
+    }
   }
 
   context.subscriptions.push(
@@ -1318,7 +1963,8 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
             : "(n/a)"
         }`,
         `sshFile(if set): ${vscode.Uri.joinPath(sshStore.getFolderUri(), "more-connect-ssh.json").fsPath}`,
-        `webLinksFile(if set): ${vscode.Uri.joinPath(webLinkStore.getFolderUri(), "more-connect-web-links.json").fsPath}`
+        `webLinksFile(if set): ${vscode.Uri.joinPath(webLinkStore.getFolderUri(), "more-connect-web-links.json").fsPath}`,
+        `ollamaFile(if set): ${vscode.Uri.joinPath(ollamaStore.getFolderUri(), "more-connect-ollama.json").fsPath}`
       ].join("\n");
 
       const choice = await vscode.window.showInformationMessage(info, "Copy", "Open globalStorage");
@@ -1341,6 +1987,7 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
       await store.setFolderUri(pick[0]);
       await sshStore.setFolderUri(pick[0]);
       await webLinkStore.setFolderUri(pick[0]);
+      await ollamaStore.setFolderUri(pick[0]);
       vscode.window.showInformationMessage(
         `Connection storage: ${vscode.Uri.joinPath(pick[0], "more-connect-connections.json").fsPath}`
       );
@@ -1495,6 +2142,204 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
       view.refresh();
     }),
 
+    vscode.commands.registerCommand("moreConnect.addOllamaConnection", async () => {
+      const urlInput = await vscode.window.showInputBox({
+        title: "Add Ollama endpoint",
+        prompt: "Enter Ollama URL (e.g. http://localhost:11434)",
+        ignoreFocusOut: true
+      });
+      if (urlInput === undefined) return;
+      const normalizedUrl = normalizeOllamaUrl(urlInput);
+      if (!normalizedUrl) {
+        vscode.window.showErrorMessage("Invalid Ollama URL. Use http://host:port");
+        return;
+      }
+      const name = await vscode.window.showInputBox({
+        title: "Endpoint name",
+        prompt: "Display name in the Ollama view",
+        value: normalizedUrl,
+        ignoreFocusOut: true
+      });
+      if (!name?.trim()) return;
+      const next = [...ollamaStore.list(), { id: randomUUID(), name: name.trim(), url: normalizedUrl }];
+      await ollamaStore.saveAll(next);
+      view.refresh();
+    }),
+
+    vscode.commands.registerCommand("moreConnect.editOllamaConnection", async (node?: ExplorerNode) => {
+      const endpoint = node?.kind === "ollama" ? node.endpoint : undefined;
+      if (!endpoint) return;
+      const nextUrlInput = await vscode.window.showInputBox({
+        title: `Edit Ollama endpoint: ${endpoint.name}`,
+        prompt: "Ollama URL (http/https)",
+        value: endpoint.url,
+        ignoreFocusOut: true
+      });
+      if (nextUrlInput === undefined) return;
+      const normalizedUrl = normalizeOllamaUrl(nextUrlInput);
+      if (!normalizedUrl) {
+        vscode.window.showErrorMessage("Invalid Ollama URL. Use http://host:port");
+        return;
+      }
+      const nextName = await vscode.window.showInputBox({
+        title: `Edit Ollama endpoint: ${endpoint.name}`,
+        prompt: "Display name in the Ollama view",
+        value: endpoint.name,
+        ignoreFocusOut: true
+      });
+      if (nextName === undefined) return;
+      const updated = { ...endpoint, name: nextName.trim() || endpoint.name, url: normalizedUrl };
+      await ollamaStore.saveAll(ollamaStore.list().map((item) => (item.id === endpoint.id ? updated : item)));
+      view.refresh();
+    }),
+
+    vscode.commands.registerCommand("moreConnect.removeOllamaConnection", async (node?: ExplorerNode) => {
+      const endpoint = node?.kind === "ollama" ? node.endpoint : undefined;
+      if (!endpoint) return;
+      await ollamaStore.saveAll(ollamaStore.list().filter((item) => item.id !== endpoint.id));
+      view.refresh();
+    }),
+
+    vscode.commands.registerCommand("moreConnect.refreshOllamaModels", async (node?: ExplorerNode) => {
+      const endpoint = await pickOllamaEndpoint(node);
+      if (!endpoint) return;
+      try {
+        const models = await fetchOllamaModels(endpoint);
+        view.refresh(node?.kind === "ollama" ? node : undefined);
+        vscode.window.showInformationMessage(`Ollama models: ${models.length}`);
+      } catch (e) {
+        vscode.window.showErrorMessage(`Ollama list failed: ${(e as Error).message}`);
+      }
+    }),
+
+    vscode.commands.registerCommand("moreConnect.ollamaPullModel", async (node?: ExplorerNode) => {
+      const endpoint = await pickOllamaEndpoint(node);
+      if (!endpoint) return;
+
+      const modelFromNode = node?.kind === "ollamaModel" ? node.model : undefined;
+      const modelInput = await vscode.window.showInputBox({
+        title: `Pull model (${endpoint.name})`,
+        prompt: "Model name (e.g. llama3.2:3b)",
+        value: modelFromNode,
+        ignoreFocusOut: true
+      });
+      if (!modelInput?.trim()) return;
+
+      try {
+        const result = await fetchOllamaJson(endpoint, "/api/pull", {
+          method: "POST",
+          body: JSON.stringify({ model: modelInput.trim(), stream: false })
+        });
+        view.refresh();
+        const status = String(result?.status ?? "done");
+        vscode.window.showInformationMessage(`Model pull: ${status}`);
+      } catch (e) {
+        vscode.window.showErrorMessage(`Model pull failed: ${(e as Error).message}`);
+      }
+    }),
+
+    vscode.commands.registerCommand("moreConnect.ollamaDeleteModel", async (node?: ExplorerNode) => {
+      const endpoint = await pickOllamaEndpoint(node);
+      if (!endpoint) return;
+      const model = node?.kind === "ollamaModel" ? node.model : await pickOllamaModel(endpoint);
+      if (!model) return;
+      const confirm = await vscode.window.showWarningMessage(
+        `Delete Ollama model "${model}" on ${endpoint.name}?`,
+        { modal: true },
+        "Delete"
+      );
+      if (confirm !== "Delete") return;
+      try {
+        // Prefer current Ollama API shape: DELETE /api/delete with JSON body.
+        // Fallback to older variants for compatibility.
+        try {
+          await fetchOllamaJson(endpoint, "/api/delete", {
+            method: "DELETE",
+            body: JSON.stringify({ model })
+          });
+        } catch (e) {
+          const message = String((e as Error).message ?? "");
+          if (!message.includes("HTTP 405")) throw e;
+          try {
+            await fetchOllamaJson(endpoint, "/api/delete", {
+              method: "POST",
+              body: JSON.stringify({ model })
+            });
+          } catch {
+            await fetchOllamaJson(endpoint, "/api/delete", {
+              method: "POST",
+              body: JSON.stringify({ name: model })
+            });
+          }
+        }
+        view.refresh();
+        vscode.window.showInformationMessage(`Model deleted: ${model}`);
+      } catch (e) {
+        vscode.window.showErrorMessage(`Model delete failed: ${(e as Error).message}`);
+      }
+    }),
+
+    vscode.commands.registerCommand("moreConnect.copyOllamaModelName", async (node?: ExplorerNode) => {
+      const endpoint = await pickOllamaEndpoint(node);
+      if (!endpoint) return;
+      const model =
+        node?.kind === "ollamaModel" ? node.model : await pickOllamaModel(endpoint);
+      if (!model) return;
+      await vscode.env.clipboard.writeText(model);
+      vscode.window.showInformationMessage(`Copied model: ${model}`);
+    }),
+
+    vscode.commands.registerCommand("moreConnect.showOllamaModelInfo", async (node?: ExplorerNode) => {
+      const endpoint = await pickOllamaEndpoint(node);
+      if (!endpoint) return;
+      const model = node?.kind === "ollamaModel" ? node.model : await pickOllamaModel(endpoint);
+      if (!model) return;
+      try {
+        const infos = await fetchOllamaModelInfoMap(endpoint);
+        const info = await enrichOllamaModelContextLimit(endpoint, model, infos[model]);
+        const sizeText =
+          info.sizeBytes !== undefined ? `${(info.sizeBytes / (1024 * 1024 * 1024)).toFixed(2)} GB` : "-";
+        const body = [
+          `<h1>Model: <code>${escapeHtml(model)}</code></h1>`,
+          `<h2>Endpoint</h2>`,
+          `<p>${escapeHtml(endpoint.name)} (${escapeHtml(endpoint.url)})</p>`,
+          `<h2>Details</h2>`,
+          renderTable(
+            ["field", "value"],
+            [
+              ["size", sizeText],
+              ["context limit", info.contextLimit !== undefined ? String(info.contextLimit) : "-"],
+              ["parameter size", info.parameterSize ?? "-"],
+              ["quantization", info.quantization ?? "-"],
+              ["family", info.family ?? "-"],
+              ["format", info.format ?? "-"]
+            ]
+          )
+        ].join("\n");
+        infoPanel.show(`Ollama Model: ${model}`, body);
+      } catch (e) {
+        vscode.window.showErrorMessage(`Model info failed: ${(e as Error).message}`);
+      }
+    }),
+
+    vscode.commands.registerCommand("moreConnect.ollamaChat", async (node?: ExplorerNode) => {
+      const endpoint = await pickOllamaEndpoint(node);
+      if (!endpoint) return;
+
+      const modelFromNode = node?.kind === "ollamaModel" ? node.model : undefined;
+      let model = modelFromNode;
+      if (!model) {
+        try {
+          model = await pickOllamaModel(endpoint);
+        } catch (e) {
+          vscode.window.showErrorMessage(`Model list failed: ${(e as Error).message}`);
+          return;
+        }
+      }
+      if (!model) return;
+      await showOllamaChat(endpoint, model);
+    }),
+
     vscode.commands.registerCommand("moreConnect.openInternalBrowser", async () => {
       const urlInput = await vscode.window.showInputBox({
         title: "Open internal browser",
@@ -1537,7 +2382,27 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
     }),
 
     vscode.commands.registerCommand("moreConnect.openBrowserDevTools", async () => {
-      await vscode.commands.executeCommand("workbench.action.webview.openDeveloperTools");
+      const commands = await vscode.commands.getCommands(true);
+      const activeTab = vscode.window.tabGroups.activeTabGroup.activeTab;
+      const isWebviewTab =
+        !!activeTab &&
+        (activeTab.input instanceof vscode.TabInputWebview || activeTab.input instanceof vscode.TabInputWebviewView);
+
+      if (isWebviewTab && commands.includes("workbench.action.webview.openDeveloperTools")) {
+        try {
+          await vscode.commands.executeCommand("workbench.action.webview.openDeveloperTools");
+          return;
+        } catch {}
+      }
+
+      for (const id of ["workbench.action.toggleDevTools", "workbench.action.toggleDeveloperTools"]) {
+        if (!commands.includes(id)) continue;
+        try {
+          await vscode.commands.executeCommand(id);
+          return;
+        } catch {}
+      }
+      vscode.window.showErrorMessage("Developer tools command is unavailable in this VS Code build.");
     }),
 
     vscode.commands.registerCommand("moreConnect.addConnection", async () => {

@@ -9,6 +9,13 @@ MySQL/MariaDB/PostgreSQL/SQLite/Oracle/Redis에 연결하고 쿼리를 실행하
 - 비밀번호는 VS Code Secret Storage에 저장
 - Redis는 별도 패키지 없이(순수 TS + RESP) 연결
 - SQLite/Oracle은 런타임 의존성이 필요할 수 있음 (아래 참고)
+- Ollama 엔드포인트 관리 (추가/수정/삭제)
+- Ollama 모델 목록/모델 Pull/모델 삭제/모델명 복사
+- Ollama 채팅 (스트리밍 응답, 중지, 모델 전환)
+- Ollama 모델 정보 보기 (size/context/params/quantization 등)
+- Ollama 모델별 채팅 세션 저장 및 세션별 다시 불러오기
+- Ollama 채팅 응답 메타 표시 (입력 토큰/출력 토큰/처리시간)
+- Ollama 채팅 Markdown 렌더링 (헤더, 표, 코드블록, 링크, 리스트/인용)
 
 ## Notes (Drivers)
 - `Redis`: 확장에 내장(추가 설치 불필요)
