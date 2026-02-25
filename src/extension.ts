@@ -1865,6 +1865,13 @@ FROM information_schema.columns
 WHERE table_schema = ${quoteStringPg(node.schema ?? "public")}
   AND table_name = ${quoteStringPg(node.table)}
 ORDER BY ordinal_position;`
+          : effectiveConfig.type === "sqlite"
+            ? `SELECT name AS column_name,
+       type AS data_type,
+       CASE "notnull" WHEN 1 THEN 'NO' ELSE 'YES' END AS is_nullable,
+       dflt_value AS column_default
+FROM pragma_table_info(${quoteStringPg(node.table)})
+ORDER BY cid;`
           : `SELECT COLUMN_NAME as column_name, COLUMN_TYPE as data_type, IS_NULLABLE as is_nullable, COLUMN_DEFAULT as column_default
 FROM information_schema.COLUMNS
 WHERE TABLE_SCHEMA = ${quoteStringMysql(node.database)}
@@ -1878,6 +1885,13 @@ FROM pg_indexes
 WHERE schemaname = ${quoteStringPg(node.schema ?? "public")}
   AND tablename = ${quoteStringPg(node.table)}
 ORDER BY indexname;`
+          : effectiveConfig.type === "sqlite"
+            ? `SELECT name AS index_name,
+       CASE "unique" WHEN 1 THEN 0 ELSE 1 END AS non_unique,
+       origin AS index_type,
+       partial
+FROM pragma_index_list(${quoteStringPg(node.table)})
+ORDER BY name;`
           : `SELECT INDEX_NAME as index_name,
        NON_UNIQUE as non_unique,
        SEQ_IN_INDEX as seq_in_index,
@@ -1913,6 +1927,16 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
               ["name", "definition"],
               indexes.map((r) => [String(r["index_name"] ?? ""), String(r["index_def"] ?? "")])
             )
+          : effectiveConfig.type === "sqlite"
+            ? renderTable(
+                ["name", "unique", "origin", "partial"],
+                indexes.map((r) => [
+                  String(r["index_name"] ?? ""),
+                  String(Number(r["non_unique"] ?? 1) === 0 ? "YES" : "NO"),
+                  String(r["index_type"] ?? ""),
+                  String(Number(r["partial"] ?? 0) === 1 ? "YES" : "NO")
+                ])
+              )
           : renderTable(
               ["name", "unique", "seq", "column", "type"],
               indexes.map((r) => [
@@ -3045,6 +3069,10 @@ function buildSelectPreviewSql(type: DbType, database: string, table: string, sc
   if (type === "postgres") {
     const qTable = schema ? `${quoteIdentPg(schema)}.${quoteIdentPg(table)}` : quoteIdentPg(table);
     return `SELECT * FROM ${qTable} LIMIT 200;`;
+  }
+  if (type === "sqlite") {
+    // `database` may be the SQLite file path from listDatabases(); do not qualify table names with it.
+    return `SELECT * FROM ${quoteIdentPg(table)} LIMIT 200;`;
   }
   if (type === "oracle") {
     const owner = (schema ?? database ?? "").trim();
