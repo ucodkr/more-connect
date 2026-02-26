@@ -28,6 +28,7 @@
     "onCommand:moreConnect.addConnection",
     "onCommand:moreConnect.addOllamaConnection",
     "onCommand:moreConnect.addVsCodeFavorite",
+    "onCommand:moreConnect.previewMarkdownFile",
     "onCommand:moreConnect.runQuery",
     "onCommand:moreConnect.openInternalBrowser",
     "onCommand:moreConnect.openExternalBrowser",
@@ -239,6 +240,11 @@
         "command": "moreConnect.openBrowserDevTools",
         "title": "More Connect: Open Browser Developer Tools",
         "icon": "$(tools)"
+      },
+      {
+        "command": "moreConnect.previewMarkdownFile",
+        "title": "More Connect: Preview Markdown (.md)",
+        "icon": "$(markdown)"
       },
       {
         "command": "moreConnect.runSqlFile",
@@ -564,7 +570,24 @@
           "group": "navigation"
         }
       ],
+      "explorer/context": [
+        {
+          "command": "moreConnect.previewMarkdownFile",
+          "when": "resourceExtname == .md",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.previewMarkdownFile",
+          "when": "resourceExtname == .markdown",
+          "group": "navigation"
+        }
+      ],
       "editor/title": [
+        {
+          "command": "moreConnect.previewMarkdownFile",
+          "when": "resourceLangId == markdown",
+          "group": "navigation"
+        },
         {
           "command": "moreConnect.selectConnectionForSql",
           "when": "resourceLangId == sql",
@@ -592,6 +615,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "moreConnect.previewMarkdownFile",
+          "when": "resourceLangId == markdown"
+        },
         {
           "command": "moreConnect.runQueryFromEditor",
           "when": "editorTextFocus"

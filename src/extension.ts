@@ -369,6 +369,27 @@ export async function activate(context: vscode.ExtensionContext) {
     await vscode.commands.executeCommand("simpleBrowser.show", url);
   }
 
+  async function previewMarkdownFile(uri?: vscode.Uri): Promise<void> {
+    let target = uri;
+    if (!target) {
+      const active = vscode.window.activeTextEditor?.document;
+      if (active && !active.isUntitled) target = active.uri;
+    }
+    if (!target) {
+      vscode.window.showInformationMessage("Select a .md file first.");
+      return;
+    }
+
+    const ext = path.extname(target.fsPath || target.path).toLowerCase();
+    if (ext !== ".md" && ext !== ".markdown") {
+      vscode.window.showErrorMessage("Only .md/.markdown files are supported.");
+      return;
+    }
+
+    await vscode.commands.executeCommand("vscode.open", target);
+    await vscode.commands.executeCommand("markdown.showPreviewToSide", target);
+  }
+
   function normalizeUserPathInput(input: string): string | undefined {
     const trimmed = input.trim().replace(/^['"]+|['"]+$/g, "");
     return trimmed || undefined;
@@ -1248,8 +1269,9 @@ export async function activate(context: vscode.ExtensionContext) {
       if (node.kind === "sqlItem") {
         setActiveDatabaseForConnection(node.connectionId, node.database);
       }
-    })
-  );
+    }),
+  )
+  ;
 
   function postResultsStatus(text: string): void {
     resultsPanel.postMessage({ type: "results.status", text });
@@ -2889,6 +2911,10 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
         } catch {}
       }
       vscode.window.showErrorMessage("Developer tools command is unavailable in this VS Code build.");
+    }),
+
+    vscode.commands.registerCommand("moreConnect.previewMarkdownFile", async (uri?: vscode.Uri) => {
+      await previewMarkdownFile(uri);
     }),
 
     vscode.commands.registerCommand("moreConnect.addConnection", async () => {
