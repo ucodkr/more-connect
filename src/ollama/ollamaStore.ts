@@ -22,8 +22,8 @@ export class OllamaStore {
   }
 
   public async saveAll(items: OllamaEndpoint[]): Promise<void> {
-    this.items = items;
-    await this.writeFile(this.folder, items);
+    this.items = this.normalizeItems(items);
+    await this.writeFile(this.folder, this.items);
   }
 
   public getFolderUri(): vscode.Uri {
@@ -65,7 +65,7 @@ export class OllamaStore {
       const bytes = await vscode.workspace.fs.readFile(this.fileUri(folder));
       const text = Buffer.from(bytes).toString("utf8");
       const parsed = JSON.parse(text);
-      return Array.isArray(parsed) ? (parsed as OllamaEndpoint[]) : undefined;
+      return Array.isArray(parsed) ? this.normalizeItems(parsed as OllamaEndpoint[]) : undefined;
     } catch {
       return;
     }
@@ -73,7 +73,14 @@ export class OllamaStore {
 
   private async writeFile(folder: vscode.Uri, items: OllamaEndpoint[]): Promise<void> {
     await vscode.workspace.fs.createDirectory(folder);
-    const text = JSON.stringify(items, null, 2);
+    const text = JSON.stringify(this.normalizeItems(items), null, 2);
     await vscode.workspace.fs.writeFile(this.fileUri(folder), Buffer.from(text, "utf8"));
+  }
+
+  private normalizeItems(items: OllamaEndpoint[]): OllamaEndpoint[] {
+    return items.map((item) => ({
+      ...item,
+      provider: item.provider === "vllm" ? "vllm" : "ollama"
+    }));
   }
 }

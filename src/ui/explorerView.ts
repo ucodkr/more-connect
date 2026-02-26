@@ -207,8 +207,9 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
       case "ollama": {
         const item = new vscode.TreeItem(element.endpoint.name, vscode.TreeItemCollapsibleState.Collapsed);
         item.contextValue = "ollamaConnection";
-        item.description = element.endpoint.url;
-        item.tooltip = element.endpoint.url;
+        const provider = element.endpoint.provider === "vllm" ? "vLLM" : "Ollama";
+        item.description = `${provider} • ${element.endpoint.url}`;
+        item.tooltip = `${provider}: ${element.endpoint.url}`;
         item.iconPath = new vscode.ThemeIcon("hubot");
         return item;
       }
@@ -229,11 +230,6 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
         item.description = element.favorite.kind === "workspace" ? ".code-workspace" : "folder";
         item.tooltip = element.favorite.targetPath;
         item.iconPath = new vscode.ThemeIcon(element.favorite.kind === "workspace" ? "file-submodule" : "folder");
-        item.command = {
-          command: "moreConnect.openVsCodeFavorite",
-          title: "Open in New VS Code",
-          arguments: [element]
-        };
         return item;
       }
     }

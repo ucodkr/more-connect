@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import * as path from "node:path";
-import type { ConnectionConfig, DbType, OllamaEndpoint, QueryResult, VsCodeFavorite } from "./types";
+import type { ConnectionConfig, DbType, LlmProvider, OllamaEndpoint, QueryResult, VsCodeFavorite } from "./types";
 import { ConnectionStore } from "./storage";
 import { createClient, type OptionalModuleLoader } from "./db/factory";
 import type { DbClient } from "./db/client";
@@ -475,6 +475,18 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   }
 
+  function llmProviderOf(endpoint: OllamaEndpoint): LlmProvider {
+    return endpoint.provider === "vllm" ? "vllm" : "ollama";
+  }
+
+  function llmProviderLabel(endpoint: OllamaEndpoint): string {
+    return llmProviderOf(endpoint) === "vllm" ? "vLLM" : "Ollama";
+  }
+
+  function isOllamaProvider(endpoint: OllamaEndpoint): boolean {
+    return llmProviderOf(endpoint) === "ollama";
+  }
+
   async function fetchOllamaJson(
     endpoint: OllamaEndpoint,
     path: string,
@@ -504,6 +516,14 @@ export async function activate(context: vscode.ExtensionContext) {
   }
 
   async function fetchOllamaModels(endpoint: OllamaEndpoint): Promise<string[]> {
+    if (llmProviderOf(endpoint) === "vllm") {
+      const payload = await fetchOllamaJson(endpoint, "/v1/models");
+      const names = (Array.isArray(payload?.data) ? payload.data : [])
+        .map((m: any) => String(m?.id ?? "").trim())
+        .filter(Boolean)
+        .sort((a: string, b: string) => a.localeCompare(b));
+      return Array.from(new Set(names.values()));
+    }
     const models = await fetchOllamaTagModels(endpoint);
     const names = models
       .map((m: any) => String(m?.name ?? m?.model ?? "").trim())
@@ -554,6 +574,19 @@ export async function activate(context: vscode.ExtensionContext) {
   async function fetchOllamaModelInfoMap(
     endpoint: OllamaEndpoint
   ): Promise<Record<string, OllamaModelInfo>> {
+    if (llmProviderOf(endpoint) === "vllm") {
+      const payload = await fetchOllamaJson(endpoint, "/v1/models");
+      const map: Record<string, OllamaModelInfo> = {};
+      for (const item of Array.isArray(payload?.data) ? payload.data : []) {
+        const name = String(item?.id ?? "").trim();
+        if (!name) continue;
+        map[name] = {
+          name,
+          family: String(item?.owned_by ?? "").trim() || "vllm"
+        };
+      }
+      return map;
+    }
     const tags = await fetchOllamaTagModels(endpoint);
     const map: Record<string, OllamaModelInfo> = {};
     for (const t of tags) {
@@ -570,6 +603,7 @@ export async function activate(context: vscode.ExtensionContext) {
     base: OllamaModelInfo | undefined
   ): Promise<OllamaModelInfo> {
     const info: OllamaModelInfo = { ...(base ?? { name: model }), name: model };
+    if (llmProviderOf(endpoint) === "vllm") return info;
     try {
       const show = await fetchOllamaJson(endpoint, "/api/show", {
         method: "POST",
@@ -588,27 +622,55 @@ export async function activate(context: vscode.ExtensionContext) {
     }
     const all = ollamaStore.list();
     if (all.length === 0) {
-      vscode.window.showInformationMessage("No Ollama endpoint. Add one first.");
+      vscode.window.showInformationMessage("No Ollama/vLLM endpoint. Add one first.");
       return;
     }
     const picked = await vscode.window.showQuickPick(
-      all.map((item) => ({ label: item.name, description: item.url, endpoint: item })),
-      { title: "Select Ollama endpoint", ignoreFocusOut: true }
+      all.map((item) => ({
+        label: item.name,
+        description: `${llmProviderLabel(item)} • ${item.url}`,
+        endpoint: item
+      })),
+      { title: "Select Ollama/vLLM endpoint", ignoreFocusOut: true }
     );
     return picked?.endpoint;
   }
 
   async function pickOllamaModel(endpoint: OllamaEndpoint, preselected?: string): Promise<string | undefined> {
-    const models = await fetchOllamaModels(endpoint);
-    if (models.length === 0) {
-      vscode.window.showInformationMessage(`No models on ${endpoint.name}. Pull a model first.`);
-      return;
+    const promptModelInput = async (message?: string): Promise<string | undefined> => {
+      if (message) vscode.window.showInformationMessage(message);
+      const value = await vscode.window.showInputBox({
+        title: `Model name (${endpoint.name})`,
+        prompt:
+          llmProviderOf(endpoint) === "vllm"
+            ? "Enter vLLM model id (served model name)"
+            : "Enter Ollama model name",
+        value: preselected,
+        ignoreFocusOut: true
+      });
+      return value?.trim() || undefined;
+    };
+
+    try {
+      const models = await fetchOllamaModels(endpoint);
+      if (models.length === 0) {
+        if (llmProviderOf(endpoint) === "vllm") {
+          return promptModelInput(`No model list from ${endpoint.name}. Enter the vLLM model id manually.`);
+        }
+        vscode.window.showInformationMessage(`No models on ${endpoint.name}. Pull a model first.`);
+        return;
+      }
+      const picked = await vscode.window.showQuickPick(
+        models.map((model) => ({ label: model, picked: model === preselected })),
+        { title: `Select model (${endpoint.name})`, ignoreFocusOut: true }
+      );
+      return picked?.label;
+    } catch (e) {
+      if (llmProviderOf(endpoint) === "vllm") {
+        return promptModelInput(`vLLM model list unavailable: ${(e as Error).message}`);
+      }
+      throw e;
     }
-    const picked = await vscode.window.showQuickPick(
-      models.map((model) => ({ label: model, picked: model === preselected })),
-      { title: `Select model (${endpoint.name})`, ignoreFocusOut: true }
-    );
-    return picked?.label;
   }
 
   function ollamaChatKey(endpointId: string, model: string): string {
@@ -621,6 +683,21 @@ export async function activate(context: vscode.ExtensionContext) {
 
   function ollamaSessionScopeKey(endpointId: string, model: string): string {
     return `${endpointId}::${model}`;
+  }
+
+  async function pickLlmProvider(initial?: LlmProvider): Promise<LlmProvider | undefined> {
+    const picked = await vscode.window.showQuickPick(
+      [
+        { label: "Ollama", description: "Ollama API (/api/*)", value: "ollama" as const },
+        { label: "vLLM", description: "OpenAI-compatible API (/v1/*)", value: "vllm" as const }
+      ],
+      {
+        title: "Select LLM endpoint type",
+        ignoreFocusOut: true,
+        placeHolder: initial === "vllm" ? "Current: vLLM" : "Current: Ollama"
+      }
+    );
+    return picked?.value;
   }
 
   function listOllamaSessions(endpointId: string, model: string): OllamaSession[] {
@@ -690,6 +767,13 @@ export async function activate(context: vscode.ExtensionContext) {
   }
 
   function ollamaMetaFromChatResponse(result: any): OllamaChatMessage["meta"] {
+    const usage = result?.usage;
+    if (usage && typeof usage === "object") {
+      const inputTokens = toNumberOrUndefined(usage?.prompt_tokens);
+      const outputTokens = toNumberOrUndefined(usage?.completion_tokens);
+      const totalMs = toNumberOrUndefined(result?.latency_ms);
+      return { inputTokens, outputTokens, totalMs };
+    }
     const inputTokens = toNumberOrUndefined(result?.prompt_eval_count);
     const outputTokens = toNumberOrUndefined(result?.eval_count);
     const totalDurationNs = toNumberOrUndefined(result?.total_duration);
@@ -708,6 +792,78 @@ export async function activate(context: vscode.ExtensionContext) {
     panelKey: string,
     signal: AbortSignal
   ): Promise<{ content: string; finalChunk?: any }> {
+    if (llmProviderOf(endpoint) === "vllm") {
+      const url = `${endpoint.url}/v1/chat/completions`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ...body,
+          stream: true,
+          stream_options: { include_usage: true }
+        }),
+        signal
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status}${text ? `: ${text.slice(0, 160)}` : ""}`);
+      }
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response body");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let content = "";
+      let finalChunk: any;
+
+      const processSseLine = (line: string) => {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:")) return;
+        const data = trimmed.slice(5).trim();
+        if (!data || data === "[DONE]") return;
+        try {
+          const chunk = JSON.parse(data);
+          const deltaValue = chunk?.choices?.[0]?.delta?.content;
+          const delta =
+            typeof deltaValue === "string"
+              ? deltaValue
+              : Array.isArray(deltaValue)
+                ? deltaValue.map((part: any) => String(part?.text ?? "")).join("")
+                : "";
+          if (delta) {
+            content += delta;
+            ollamaChatPanel.postMessage(panelKey, { type: "ollama.streamDelta", delta });
+          }
+          if (chunk?.usage || chunk?.choices?.[0]?.finish_reason) finalChunk = chunk;
+        } catch {}
+      };
+
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let split = buffer.indexOf("\n\n");
+          while (split >= 0) {
+            const event = buffer.slice(0, split);
+            buffer = buffer.slice(split + 2);
+            for (const line of event.split("\n")) processSseLine(line);
+            split = buffer.indexOf("\n\n");
+          }
+        }
+      } catch (e) {
+        (e as any).partialContent = content;
+        throw e;
+      }
+
+      const tail = (buffer + decoder.decode()).trim();
+      if (tail) {
+        for (const line of tail.split("\n")) processSseLine(line);
+      }
+
+      return { content, finalChunk };
+    }
+
     const url = `${endpoint.url}/api/chat`;
     const res = await fetch(url, {
       method: "POST",
@@ -2453,25 +2609,30 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
     }),
 
     vscode.commands.registerCommand("moreConnect.addOllamaConnection", async () => {
+      const provider = await pickLlmProvider("ollama");
+      if (!provider) return;
       const urlInput = await vscode.window.showInputBox({
-        title: "Add Ollama endpoint",
-        prompt: "Enter Ollama URL (e.g. http://localhost:11434)",
+        title: `Add ${provider === "vllm" ? "vLLM" : "Ollama"} endpoint`,
+        prompt:
+          provider === "vllm"
+            ? "Enter vLLM URL (e.g. http://localhost:8000)"
+            : "Enter Ollama URL (e.g. http://localhost:11434)",
         ignoreFocusOut: true
       });
       if (urlInput === undefined) return;
       const normalizedUrl = normalizeOllamaUrl(urlInput);
       if (!normalizedUrl) {
-        vscode.window.showErrorMessage("Invalid Ollama URL. Use http://host:port");
+        vscode.window.showErrorMessage("Invalid URL. Use http://host:port");
         return;
       }
       const name = await vscode.window.showInputBox({
         title: "Endpoint name",
-        prompt: "Display name in the Ollama view",
+        prompt: "Display name in the Ollama/vLLM view",
         value: normalizedUrl,
         ignoreFocusOut: true
       });
       if (!name?.trim()) return;
-      const next = [...ollamaStore.list(), { id: randomUUID(), name: name.trim(), url: normalizedUrl }];
+      const next = [...ollamaStore.list(), { id: randomUUID(), name: name.trim(), url: normalizedUrl, provider }];
       await ollamaStore.saveAll(next);
       view.refresh();
     }),
@@ -2479,16 +2640,18 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
     vscode.commands.registerCommand("moreConnect.editOllamaConnection", async (node?: ExplorerNode) => {
       const endpoint = node?.kind === "ollama" ? node.endpoint : undefined;
       if (!endpoint) return;
+      const provider = await pickLlmProvider(llmProviderOf(endpoint));
+      if (!provider) return;
       const nextUrlInput = await vscode.window.showInputBox({
-        title: `Edit Ollama endpoint: ${endpoint.name}`,
-        prompt: "Ollama URL (http/https)",
+        title: `Edit ${llmProviderLabel(endpoint)} endpoint: ${endpoint.name}`,
+        prompt: "Endpoint URL (http/https)",
         value: endpoint.url,
         ignoreFocusOut: true
       });
       if (nextUrlInput === undefined) return;
       const normalizedUrl = normalizeOllamaUrl(nextUrlInput);
       if (!normalizedUrl) {
-        vscode.window.showErrorMessage("Invalid Ollama URL. Use http://host:port");
+        vscode.window.showErrorMessage("Invalid URL. Use http://host:port");
         return;
       }
       const nextName = await vscode.window.showInputBox({
@@ -2498,7 +2661,7 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
         ignoreFocusOut: true
       });
       if (nextName === undefined) return;
-      const updated = { ...endpoint, name: nextName.trim() || endpoint.name, url: normalizedUrl };
+      const updated = { ...endpoint, name: nextName.trim() || endpoint.name, url: normalizedUrl, provider };
       await ollamaStore.saveAll(ollamaStore.list().map((item) => (item.id === endpoint.id ? updated : item)));
       view.refresh();
     }),
@@ -2516,15 +2679,19 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
       try {
         const models = await fetchOllamaModels(endpoint);
         view.refresh(node?.kind === "ollama" ? node : undefined);
-        vscode.window.showInformationMessage(`Ollama models: ${models.length}`);
+        vscode.window.showInformationMessage(`${llmProviderLabel(endpoint)} models: ${models.length}`);
       } catch (e) {
-        vscode.window.showErrorMessage(`Ollama list failed: ${(e as Error).message}`);
+        vscode.window.showErrorMessage(`${llmProviderLabel(endpoint)} list failed: ${(e as Error).message}`);
       }
     }),
 
     vscode.commands.registerCommand("moreConnect.ollamaPullModel", async (node?: ExplorerNode) => {
       const endpoint = await pickOllamaEndpoint(node);
       if (!endpoint) return;
+      if (!isOllamaProvider(endpoint)) {
+        vscode.window.showInformationMessage("Model pull is only supported for Ollama endpoints.");
+        return;
+      }
 
       const modelFromNode = node?.kind === "ollamaModel" ? node.model : undefined;
       const modelInput = await vscode.window.showInputBox({
@@ -2551,6 +2718,10 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
     vscode.commands.registerCommand("moreConnect.ollamaDeleteModel", async (node?: ExplorerNode) => {
       const endpoint = await pickOllamaEndpoint(node);
       if (!endpoint) return;
+      if (!isOllamaProvider(endpoint)) {
+        vscode.window.showInformationMessage("Model delete is only supported for Ollama endpoints.");
+        return;
+      }
       const model = node?.kind === "ollamaModel" ? node.model : await pickOllamaModel(endpoint);
       if (!model) return;
       const confirm = await vscode.window.showWarningMessage(

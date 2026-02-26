@@ -40,10 +40,13 @@ export type WebLink = {
   url: string;
 };
 
+export type LlmProvider = "ollama" | "vllm";
+
 export type OllamaEndpoint = {
   id: string;
   name: string;
   url: string;
+  provider?: LlmProvider;
 };
 
 export type VsCodeFavorite = {
