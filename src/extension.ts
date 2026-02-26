@@ -519,7 +519,7 @@ export async function activate(context: vscode.ExtensionContext) {
     if (llmProviderOf(endpoint) === "vllm") {
       const payload = await fetchOllamaJson(endpoint, "/v1/models");
       const names = (Array.isArray(payload?.data) ? payload.data : [])
-        .map((m: any) => String(m?.id ?? "").trim())
+        .map((m: any) => String(m?.id ?? m?.model ?? "").trim())
         .filter(Boolean)
         .sort((a: string, b: string) => a.localeCompare(b));
       return Array.from(new Set(names.values()));
@@ -578,11 +578,16 @@ export async function activate(context: vscode.ExtensionContext) {
       const payload = await fetchOllamaJson(endpoint, "/v1/models");
       const map: Record<string, OllamaModelInfo> = {};
       for (const item of Array.isArray(payload?.data) ? payload.data : []) {
-        const name = String(item?.id ?? "").trim();
+        const name = String(item?.id ?? item?.model ?? "").trim();
         if (!name) continue;
         map[name] = {
           name,
-          family: String(item?.owned_by ?? "").trim() || "vllm"
+          family: String(item?.owned_by ?? "").trim() || "vllm",
+          format: "openai-compatible",
+          contextLimit: (() => {
+            const n = Number(item?.max_model_len ?? item?.max_context_length ?? item?.context_length);
+            return Number.isFinite(n) && n > 0 ? Math.trunc(n) : undefined;
+          })()
         };
       }
       return map;

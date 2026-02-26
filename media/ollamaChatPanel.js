@@ -175,6 +175,55 @@
     return out.join("");
   }
 
+  function stripThinkForDisplay(input) {
+    const raw = String(input || "");
+    const lower = raw.toLowerCase();
+    let out = "";
+    let i = 0;
+    let inThink = false;
+    let hasOpenThink = false;
+
+    while (i < raw.length) {
+      if (!inThink) {
+        const openIdx = lower.indexOf("<think>", i);
+        const strayCloseIdx = lower.indexOf("</think>", i);
+        let nextIdx = -1;
+        let token = "";
+        if (openIdx >= 0 && (strayCloseIdx < 0 || openIdx <= strayCloseIdx)) {
+          nextIdx = openIdx;
+          token = "<think>";
+        } else if (strayCloseIdx >= 0) {
+          nextIdx = strayCloseIdx;
+          token = "</think>";
+        }
+        if (nextIdx < 0) {
+          out += raw.slice(i);
+          break;
+        }
+        out += raw.slice(i, nextIdx);
+        i = nextIdx + token.length;
+        if (token === "<think>") {
+          inThink = true;
+          hasOpenThink = true;
+        }
+      } else {
+        const closeIdx = lower.indexOf("</think>", i);
+        if (closeIdx < 0) {
+          i = raw.length;
+          break;
+        }
+        i = closeIdx + "</think>".length;
+        inThink = false;
+      }
+    }
+
+    const visible = out.trim();
+    if (inThink || (hasOpenThink && !visible)) {
+      return visible ? visible + "\n\n생각중입니다..." : "생각중입니다...";
+    }
+    return out.trimEnd();
+  }
+
   function renderModelInfo() {
     const model = String(state.model || "");
     const info = state.modelInfos && typeof state.modelInfos === "object" ? state.modelInfos[model] : undefined;
@@ -182,9 +231,17 @@
     const ctx = info && Number.isFinite(info.contextLimit) ? Number(info.contextLimit).toLocaleString() : "-";
     const params = String((info && info.parameterSize) || "-");
     const quant = String((info && info.quantization) || "-");
+    const family = String((info && info.family) || "-");
+    const format = String((info && info.format) || "-");
     const modelCount = Array.isArray(state.models) ? state.models.length : 0;
     modelInfoEl.textContent =
-      "models: " + String(modelCount) + " · size: " + size + " · context: " + ctx + " · params: " + params + " · quant: " + quant;
+      "models: " + String(modelCount) +
+      " · family: " + family +
+      " · format: " + format +
+      " · context: " + ctx +
+      " · size: " + size +
+      " · params: " + params +
+      " · quant: " + quant;
   }
 
   function renderModelOptions() {
@@ -250,7 +307,11 @@
         const metaHtml = parts.length > 0 ? '<div class="meta">' + escapeHtml(parts.join(" · ")) + "</div>" : "";
         const role = String(m.role || "assistant");
         const raw = String(m.content || "");
-        const contentHtml = role === "assistant" || role === "system" ? renderMarkdown(raw) : escapeHtml(raw).replace(/\n/g, "<br/>");
+        const displayRaw = role === "assistant" ? stripThinkForDisplay(raw) : raw;
+        const contentHtml =
+          role === "assistant" || role === "system"
+            ? renderMarkdown(displayRaw)
+            : escapeHtml(displayRaw).replace(/\n/g, "<br/>");
         return '<div class="msg ' + role + '"><div class="content">' + contentHtml + "</div>" + metaHtml + "</div>";
       })
       .join("");
