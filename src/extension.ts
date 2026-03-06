@@ -19,6 +19,7 @@ import { TimeoutError, withTimeout } from "./utils/withTimeout";
 import { WebLinkStore } from "./web/webLinkStore";
 import { OllamaStore } from "./ollama/ollamaStore";
 import { VsCodeFavoriteStore } from "./vscode/vscodeFavoriteStore";
+import { RestViewProvider } from "./rest/viewProvider";
 
 const SECRET_PREFIX = "moreConnect.password.";
 const SSH_SECRET_PREFIX = "moreConnect.sshPassword.";
@@ -55,6 +56,7 @@ export async function activate(context: vscode.ExtensionContext) {
   await vsCodeFavoriteStore.init();
   const ollamaStore = new OllamaStore(context);
   await ollamaStore.init();
+  const restProvider = new RestViewProvider(context);
   const output = vscode.window.createOutputChannel("More Connect");
   const ollamaChatPanel = new OllamaChatPanel(context, async (panelKey, msg) => {
     await handleOllamaChatPanelMessage(panelKey, msg);
@@ -99,6 +101,7 @@ export async function activate(context: vscode.ExtensionContext) {
   const driverDir = vscode.Uri.joinPath(context.globalStorageUri, "drivers");
   const moduleLoader: OptionalModuleLoader = createGlobalStorageModuleLoader(driverDir.fsPath);
   const tunnels = new TunnelManager(moduleLoader);
+  const extensionVersion = String(context.extension.packageJSON.version ?? "dev");
 
   // Ensure global storage folders exist (VS Code creates them lazily otherwise).
   try {
@@ -132,6 +135,7 @@ export async function activate(context: vscode.ExtensionContext) {
       db: saved.db ?? true,
       ssh: saved.ssh ?? true,
       web: saved.web ?? true,
+      rest: saved.rest ?? true,
       vscode: saved.vscode ?? true,
       ollama: saved.ollama ?? true
     };
@@ -184,6 +188,8 @@ export async function activate(context: vscode.ExtensionContext) {
     listConnections: () => store.list(),
     listSshConnections: () => sshStore.list(),
     listWebLinks: () => webLinkStore.list(),
+    listRestCollections: async () => await restProvider.listCollections(),
+    listRestItems: async (collectionId, parentFolderId) => await restProvider.listItems(collectionId, parentFolderId),
     listVsCodeFavorites: () => vsCodeFavoriteStore.list(),
     listOllamaEndpoints: () => ollamaStore.list(),
     listOllamaModels: async (endpoint) => await fetchOllamaModels(endpoint),
@@ -213,7 +219,8 @@ export async function activate(context: vscode.ExtensionContext) {
       if (!client.isConnected) return [];
       return await client.listTables(database);
     },
-    isGroupExpanded: (group) => getExplorerGroupState()[group]
+    isGroupExpanded: (group) => getExplorerGroupState()[group],
+    getVersionLabel: () => `More Connect v${extensionVersion}`
   });
 
   const DND_MIME = "application/vnd.more-connect.connection";
@@ -226,6 +233,7 @@ export async function activate(context: vscode.ExtensionContext) {
           if (n.kind === "connection") return { kind: "db", id: n.config.id };
           if (n.kind === "ssh") return { kind: "ssh", id: n.conn.id };
           if (n.kind === "webLink") return { kind: "web", id: n.link.id };
+          if (n.kind === "restCollection") return { kind: "rest", id: n.collection.id };
           if (n.kind === "vscodeFavorite") return { kind: "vscode", id: n.favorite.id };
           if (n.kind === "ollama") return { kind: "ollama", id: n.endpoint.id };
           return;
@@ -237,7 +245,7 @@ export async function activate(context: vscode.ExtensionContext) {
     handleDrop: async (target, dataTransfer) => {
       const raw = dataTransfer.get(DND_MIME)?.value;
       if (typeof raw !== "string") return;
-      let dragged: Array<{ kind: "db" | "ssh" | "web" | "vscode" | "ollama"; id: string }> = [];
+      let dragged: Array<{ kind: "db" | "ssh" | "web" | "rest" | "vscode" | "ollama"; id: string }> = [];
       try {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) dragged = parsed;
@@ -258,6 +266,8 @@ export async function activate(context: vscode.ExtensionContext) {
               ? "ssh"
               : target?.kind === "webLink"
                 ? "web"
+                : target?.kind === "restCollection"
+                  ? "rest"
                 : target?.kind === "vscodeFavorite"
                   ? "vscode"
                 : target?.kind === "ollama"
@@ -278,6 +288,10 @@ export async function activate(context: vscode.ExtensionContext) {
               ? target?.kind === "webLink"
                 ? target.link.id
                 : undefined
+              : dragKind === "rest"
+                ? target?.kind === "restCollection"
+                  ? target.collection.id
+                  : undefined
               : dragKind === "vscode"
                 ? target?.kind === "vscodeFavorite"
                   ? target.favorite.id
@@ -310,6 +324,11 @@ export async function activate(context: vscode.ExtensionContext) {
         const idx = insertBeforeId ? remaining.findIndex((c) => c.id === insertBeforeId) : -1;
         const next = idx >= 0 ? [...remaining.slice(0, idx), ...moved, ...remaining.slice(idx)] : [...remaining, ...moved];
         await webLinkStore.saveAll(next);
+      } else if (dragKind === "rest") {
+        const movedIds = dragged.map((d) => d.id);
+        for (const id of movedIds) {
+          await restProvider.moveCollectionBefore(id, insertBeforeId);
+        }
       } else if (dragKind === "vscode") {
         const all = vsCodeFavoriteStore.list();
         const draggedIds = new Set(dragged.map((d) => d.id));
@@ -1243,6 +1262,7 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     treeView,
     output,
+    restProvider.onDidChangeState(() => view.refresh()),
     treeView.onDidExpandElement(async (e) => {
       if (e.element.kind !== "group") return;
       await setExplorerGroupExpanded(e.element.group, true);
@@ -2296,6 +2316,88 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
 
   context.subscriptions.push(
     vscode.commands.registerCommand("moreConnect.refreshConnections", () => view.refresh()),
+    vscode.commands.registerCommand("moreConnect.openRestClient", async () => {
+      await restProvider.reveal();
+    }),
+    vscode.commands.registerCommand("moreConnect.openRestEnvironments", async () => {
+      await restProvider.openEnvironments();
+    }),
+    vscode.commands.registerCommand("moreConnect.importRestData", async () => {
+      await restProvider.importData();
+    }),
+    vscode.commands.registerCommand("moreConnect.exportRestData", async () => {
+      await restProvider.exportData();
+    }),
+    vscode.commands.registerCommand("moreConnect.addRestCollection", async () => {
+      await restProvider.newCollection();
+    }),
+    vscode.commands.registerCommand("moreConnect.addRestFolder", async (node?: ExplorerNode) => {
+      if (node?.kind === "restCollection") {
+        await restProvider.newFolder(node.collection.id);
+        return;
+      }
+      if (node?.kind === "restFolder") {
+        await restProvider.newFolder(node.collectionId, node.folder.id);
+      }
+    }),
+    vscode.commands.registerCommand("moreConnect.addRestRequest", async (node?: ExplorerNode) => {
+      if (!node || node.kind === "group") {
+        await restProvider.newRequest();
+        return;
+      }
+      if (node.kind === "restCollection") {
+        await restProvider.newRequest(node.collection.id);
+        return;
+      }
+      if (node.kind === "restFolder") {
+        await restProvider.newRequest(node.collectionId, node.folder.id);
+      }
+    }),
+    vscode.commands.registerCommand("moreConnect.openRestRequest", async (node?: ExplorerNode) => {
+      if (node?.kind !== "restRequest") return;
+      await restProvider.openRequest(node.request.id);
+    }),
+    vscode.commands.registerCommand("moreConnect.duplicateRestCollection", async (node?: ExplorerNode) => {
+      if (node?.kind !== "restCollection") return;
+      await restProvider.duplicateCollection(node.collection.id);
+    }),
+    vscode.commands.registerCommand("moreConnect.duplicateRestRequest", async (node?: ExplorerNode) => {
+      if (node?.kind !== "restRequest") return;
+      await restProvider.duplicateRequest(node.request.id);
+    }),
+    vscode.commands.registerCommand("moreConnect.duplicateRestFolder", async (node?: ExplorerNode) => {
+      if (node?.kind !== "restFolder") return;
+      await restProvider.duplicateFolder(node.collectionId, node.folder.id);
+    }),
+    vscode.commands.registerCommand("moreConnect.removeRestItem", async (node?: ExplorerNode) => {
+      if (!node) return;
+      if (node.kind === "restCollection") {
+        await restProvider.deleteItem(node.collection.id, node.collection.name);
+        return;
+      }
+      if (node.kind === "restFolder") {
+        await restProvider.deleteItem(node.folder.id, node.folder.name);
+        return;
+      }
+      if (node.kind === "restRequest") {
+        await restProvider.deleteItem(node.request.id, node.request.name);
+      }
+    }),
+    vscode.commands.registerCommand("moreConnect.showInfo", async () => {
+      const storageFolderUri = store.getFolderUri() ?? context.globalStorageUri;
+      const storageFolder = storageFolderUri.fsPath;
+      const info = [
+        `version: ${extensionVersion}`,
+        `storage folder: ${storageFolder}`
+      ].join("\n");
+
+      const choice = await vscode.window.showInformationMessage(info, "Copy", "Open Storage Folder");
+      if (choice === "Copy") {
+        await vscode.env.clipboard.writeText(info);
+      } else if (choice === "Open Storage Folder") {
+        await vscode.commands.executeCommand("revealFileInOS", storageFolderUri);
+      }
+    }),
 
     vscode.commands.registerCommand("moreConnect.showStoragePaths", async () => {
       const drivers = vscode.Uri.joinPath(context.globalStorageUri, "drivers");
@@ -2310,6 +2412,7 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
         }`,
         `sshFile(if set): ${vscode.Uri.joinPath(sshStore.getFolderUri(), "more-connect-ssh.json").fsPath}`,
         `webLinksFile(if set): ${vscode.Uri.joinPath(webLinkStore.getFolderUri(), "more-connect-web-links.json").fsPath}`,
+        `restFile(if set): ${vscode.Uri.joinPath(store.getFolderUri() ?? context.globalStorageUri, "more.rest.json").fsPath}`,
         `vscodeFavoritesFile(if set): ${vscode.Uri.joinPath(vsCodeFavoriteStore.getFolderUri(), "more-connect-vscode-favorites.json").fsPath}`,
         `ollamaFile(if set): ${vscode.Uri.joinPath(ollamaStore.getFolderUri(), "more-connect-ollama.json").fsPath}`
       ].join("\n");
@@ -2323,11 +2426,13 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
     }),
 
     vscode.commands.registerCommand("moreConnect.setConnectionsStorageFolder", async () => {
+      const currentFolder = store.getFolderUri() ?? context.globalStorageUri;
       const pick = await vscode.window.showOpenDialog({
         title: "Select folder to store connection info",
         canSelectFiles: false,
         canSelectFolders: true,
         canSelectMany: false,
+        defaultUri: currentFolder,
         openLabel: "Use this folder"
       });
       if (!pick?.[0]) return;
@@ -2336,6 +2441,7 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
       await webLinkStore.setFolderUri(pick[0]);
       await vsCodeFavoriteStore.setFolderUri(pick[0]);
       await ollamaStore.setFolderUri(pick[0]);
+      await restProvider.setGlobalStorageFolder(pick[0]);
       vscode.window.showInformationMessage(
         `Connection storage: ${vscode.Uri.joinPath(pick[0], "more-connect-connections.json").fsPath}`
       );

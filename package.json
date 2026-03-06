@@ -33,6 +33,9 @@
     "onCommand:moreConnect.openInternalBrowser",
     "onCommand:moreConnect.openExternalBrowser",
     "onCommand:moreConnect.openBrowserDevTools",
+    "onCommand:moreConnect.openRestClient",
+    "onCommand:moreConnect.addRestCollection",
+    "onCommand:moreConnect.addRestRequest",
     "onView:moreConnectConnections"
   ],
   "main": "./dist/extension.js",
@@ -47,6 +50,11 @@
           "minimum": 1000,
           "maximum": 300000,
           "description": "Connection/SSH timeout in milliseconds before failing instead of waiting indefinitely."
+        },
+        "moreConnect.restGlobalStorageFolder": {
+          "type": "string",
+          "default": "",
+          "description": "Folder path to store More Connect REST data files (more.rest.json, more.rest.history.json). Leave empty to use VS Code global storage."
         }
       }
     },
@@ -135,6 +143,66 @@
         "command": "moreConnect.addWebLink",
         "title": "More Connect: Add Web Link",
         "icon": "$(add)"
+      },
+      {
+        "command": "moreConnect.openRestClient",
+        "title": "More Connect: Open REST Client",
+        "icon": "$(radio-tower)"
+      },
+      {
+        "command": "moreConnect.openRestEnvironments",
+        "title": "More Connect: Open REST Environments",
+        "icon": "$(settings)"
+      },
+      {
+        "command": "moreConnect.importRestData",
+        "title": "More Connect: Import REST Data",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "moreConnect.exportRestData",
+        "title": "More Connect: Export REST Data",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "moreConnect.addRestCollection",
+        "title": "More Connect: Add REST Collection",
+        "icon": "$(add)"
+      },
+      {
+        "command": "moreConnect.addRestFolder",
+        "title": "More Connect: Add REST Folder",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "moreConnect.addRestRequest",
+        "title": "More Connect: Add REST Request",
+        "icon": "$(radio-tower)"
+      },
+      {
+        "command": "moreConnect.openRestRequest",
+        "title": "More Connect: Open REST Request",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "moreConnect.duplicateRestCollection",
+        "title": "More Connect: Duplicate REST Collection",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "moreConnect.duplicateRestRequest",
+        "title": "More Connect: Duplicate REST Request",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "moreConnect.duplicateRestFolder",
+        "title": "More Connect: Duplicate REST Folder",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "moreConnect.removeRestItem",
+        "title": "More Connect: Remove REST Item",
+        "icon": "$(trash)"
       },
       {
         "command": "moreConnect.addVsCodeFavorite",
@@ -315,6 +383,11 @@
         "command": "moreConnect.showStoragePaths",
         "title": "More Connect: Show Storage Paths",
         "icon": "$(folder-opened)"
+      },
+      {
+        "command": "moreConnect.showInfo",
+        "title": "More Connect: Show Info",
+        "icon": "$(info)"
       }
     ],
     "viewsContainers": {
@@ -337,22 +410,22 @@
     "menus": {
       "view/title": [
         {
-          "command": "moreConnect.importSshConfig",
-          "when": "view == moreConnectConnections",
-          "group": "navigation"
-        },
-        {
           "command": "moreConnect.openInternalBrowser",
           "when": "view == moreConnectConnections",
           "group": "navigation"
         },
         {
-          "command": "moreConnect.openExternalBrowser",
+          "command": "moreConnect.openBrowserDevTools",
           "when": "view == moreConnectConnections",
           "group": "navigation"
         },
         {
-          "command": "moreConnect.openBrowserDevTools",
+          "command": "moreConnect.openRestClient",
+          "when": "view == moreConnectConnections",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.showInfo",
           "when": "view == moreConnectConnections",
           "group": "navigation"
         },
@@ -379,8 +452,18 @@
           "group": "inline"
         },
         {
+          "command": "moreConnect.importSshConfig",
+          "when": "view == moreConnectConnections && viewItem == sshGroup",
+          "group": "inline"
+        },
+        {
           "command": "moreConnect.addWebLink",
           "when": "view == moreConnectConnections && viewItem == webGroup",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.addRestCollection",
+          "when": "view == moreConnectConnections && viewItem == restGroup",
           "group": "inline"
         },
         {
@@ -392,6 +475,86 @@
           "command": "moreConnect.addOllamaConnection",
           "when": "view == moreConnectConnections && viewItem == ollamaGroup",
           "group": "inline"
+        },
+        {
+          "command": "moreConnect.openRestClient",
+          "when": "view == moreConnectConnections && viewItem == restGroup",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.openRestEnvironments",
+          "when": "view == moreConnectConnections && viewItem == restGroup",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.importRestData",
+          "when": "view == moreConnectConnections && viewItem == restGroup",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.exportRestData",
+          "when": "view == moreConnectConnections && viewItem == restGroup",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.addRestRequest",
+          "when": "view == moreConnectConnections && viewItem == restCollection",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.addRestFolder",
+          "when": "view == moreConnectConnections && viewItem == restCollection",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.duplicateRestCollection",
+          "when": "view == moreConnectConnections && viewItem == restCollection",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.removeRestItem",
+          "when": "view == moreConnectConnections && viewItem == restCollection",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.addRestRequest",
+          "when": "view == moreConnectConnections && viewItem == restFolder",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.addRestFolder",
+          "when": "view == moreConnectConnections && viewItem == restFolder",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.removeRestItem",
+          "when": "view == moreConnectConnections && viewItem == restFolder",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.duplicateRestFolder",
+          "when": "view == moreConnectConnections && viewItem == restFolder",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.openRestRequest",
+          "when": "view == moreConnectConnections && viewItem == restRequest",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.openRestClient",
+          "when": "view == moreConnectConnections && viewItem == restRequest",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.duplicateRestRequest",
+          "when": "view == moreConnectConnections && viewItem == restRequest",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.removeRestItem",
+          "when": "view == moreConnectConnections && viewItem == restRequest",
+          "group": "navigation"
         },
         {
           "command": "moreConnect.newSql",
@@ -635,6 +798,27 @@
         },
         {
           "command": "moreConnect.openBrowserDevTools"
+        },
+        {
+          "command": "moreConnect.openRestClient"
+        },
+        {
+          "command": "moreConnect.openRestEnvironments"
+        },
+        {
+          "command": "moreConnect.importRestData"
+        },
+        {
+          "command": "moreConnect.exportRestData"
+        },
+        {
+          "command": "moreConnect.addRestCollection"
+        },
+        {
+          "command": "moreConnect.addRestRequest"
+        },
+        {
+          "command": "moreConnect.showInfo"
         },
         {
           "command": "moreConnect.addVsCodeFavorite"

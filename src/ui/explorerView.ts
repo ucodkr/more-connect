@@ -1,12 +1,22 @@
 import * as vscode from "vscode";
 import type { ConnectionConfig, OllamaEndpoint, SshConnection, VsCodeFavorite, WebLink } from "../types";
+import type { Collection as RestCollection, FolderItem as RestFolderItem, RequestItem as RestRequestItem } from "../rest/models";
 
-export type ExplorerGroupName = "db" | "ssh" | "web" | "ollama" | "vscode";
+export type ExplorerGroupName = "db" | "ssh" | "web" | "rest" | "ollama" | "vscode";
 
 export type ExplorerNode =
   | {
       kind: "group";
       group: ExplorerGroupName;
+    }
+  | {
+      kind: "empty";
+      label: string;
+    }
+  | {
+      kind: "versionInfo";
+      label: string;
+      tooltip?: string;
     }
   | {
       kind: "connection";
@@ -49,6 +59,20 @@ export type ExplorerNode =
       link: WebLink;
     }
   | {
+      kind: "restCollection";
+      collection: RestCollection;
+    }
+  | {
+      kind: "restFolder";
+      collectionId: string;
+      folder: RestFolderItem;
+    }
+  | {
+      kind: "restRequest";
+      collectionId: string;
+      request: RestRequestItem;
+    }
+  | {
       kind: "ollama";
       endpoint: OllamaEndpoint;
     }
@@ -66,6 +90,8 @@ export type ExplorerDataSource = {
   listConnections(): ConnectionConfig[];
   listSshConnections(): SshConnection[];
   listWebLinks(): WebLink[];
+  listRestCollections(): Promise<RestCollection[]>;
+  listRestItems(collectionId: string, parentFolderId?: string): Promise<Array<RestFolderItem | RestRequestItem>>;
   listVsCodeFavorites(): VsCodeFavorite[];
   listOllamaEndpoints(): OllamaEndpoint[];
   listOllamaModels(endpoint: OllamaEndpoint): Promise<string[]>;
@@ -78,6 +104,7 @@ export type ExplorerDataSource = {
     database: string
   ): Promise<Array<{ name: string; schema?: string; type?: string }>>;
   isGroupExpanded(group: ExplorerGroupName): boolean;
+  getVersionLabel(): string;
 };
 
 export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
@@ -90,6 +117,10 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
     this._onDidChangeTreeData.fire(node);
   }
 
+  private withEmptyState(children: ExplorerNode[], label: string): ExplorerNode[] {
+    return children.length > 0 ? children : [{ kind: "empty", label }];
+  }
+
   public getTreeItem(element: ExplorerNode): vscode.TreeItem {
     switch (element.kind) {
       case "group": {
@@ -99,8 +130,10 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
             : element.group === "ssh"
               ? "SSH Connections"
               : element.group === "web"
-                ? "Web Links"
-                : element.group === "vscode"
+              ? "Web Links"
+              : element.group === "rest"
+                ? "REST APIs"
+              : element.group === "vscode"
                   ? "Folder/ Worksapce Favorites"
                 : "Ollama";
         const item = new vscode.TreeItem(
@@ -115,8 +148,10 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
             : element.group === "ssh"
               ? "sshGroup"
               : element.group === "web"
-                ? "webGroup"
-                : element.group === "vscode"
+              ? "webGroup"
+              : element.group === "rest"
+                ? "restGroup"
+              : element.group === "vscode"
                   ? "vscodeGroup"
                 : "ollamaGroup";
         item.iconPath = new vscode.ThemeIcon(
@@ -125,8 +160,10 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
             : element.group === "ssh"
               ? "terminal"
               : element.group === "web"
-                ? "globe"
-                : element.group === "vscode"
+              ? "globe"
+              : element.group === "rest"
+                ? "radio-tower"
+              : element.group === "vscode"
                   ? "code"
                 : "hubot"
         );
@@ -145,18 +182,31 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
           : new vscode.ThemeIcon("circle-outline");
         return item;
       }
+      case "empty": {
+        const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
+        item.contextValue = "emptyState";
+        item.iconPath = new vscode.ThemeIcon("circle-slash");
+        return item;
+      }
+      case "versionInfo": {
+        const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
+        item.contextValue = "versionInfo";
+        item.tooltip = element.tooltip ?? element.label;
+        item.iconPath = new vscode.ThemeIcon("info");
+        return item;
+      }
       case "database": {
         const item = new vscode.TreeItem(element.database, vscode.TreeItemCollapsibleState.Collapsed);
         item.contextValue = "database";
         item.iconPath = new vscode.ThemeIcon("database");
         return item;
       }
-      case "sqlFolder": {
-        const item = new vscode.TreeItem("SQL", vscode.TreeItemCollapsibleState.Collapsed);
-        item.contextValue = "sqlFolder";
-        item.iconPath = new vscode.ThemeIcon("file-code");
-        return item;
-      }
+      // case "sqlFolder": {
+      //   const item = new vscode.TreeItem("SQL", vscode.TreeItemCollapsibleState.Collapsed);
+      //   item.contextValue = "sqlFolder";
+      //   item.iconPath = new vscode.ThemeIcon("file-code");
+      //   return item;
+      // }
       case "sqlItem": {
         const item = new vscode.TreeItem(element.name, vscode.TreeItemCollapsibleState.None);
         item.contextValue = "sqlItem";
@@ -204,6 +254,29 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
         };
         return item;
       }
+      case "restCollection": {
+        const item = new vscode.TreeItem(element.collection.name, vscode.TreeItemCollapsibleState.Collapsed);
+        item.contextValue = "restCollection";
+        item.iconPath = new vscode.ThemeIcon("file-directory");
+        return item;
+      }
+      case "restFolder": {
+        const item = new vscode.TreeItem(element.folder.name, vscode.TreeItemCollapsibleState.Collapsed);
+        item.contextValue = "restFolder";
+        item.iconPath = new vscode.ThemeIcon("folder");
+        return item;
+      }
+      case "restRequest": {
+        const item = new vscode.TreeItem(element.request.name, vscode.TreeItemCollapsibleState.None);
+        item.contextValue = "restRequest";
+        item.description = element.request.method;
+        item.command = {
+          command: "moreConnect.openRestRequest",
+          title: "Open REST Request",
+          arguments: [element]
+        };
+        return item;
+      }
       case "ollama": {
         const item = new vscode.TreeItem(element.endpoint.name, vscode.TreeItemCollapsibleState.Collapsed);
         item.contextValue = "ollamaConnection";
@@ -241,45 +314,85 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
         { kind: "group", group: "db" },
         { kind: "group", group: "ssh" },
         { kind: "group", group: "web" },
+        { kind: "group", group: "rest" },
         { kind: "group", group: "vscode" },
-        { kind: "group", group: "ollama" }
+        { kind: "group", group: "ollama" },
+    
       ];
     }
 
     if (element.kind === "group" && element.group === "db") {
       const activeId = this.source.getActiveConnectionId();
-      return this.source.listConnections().map((config) => ({
+      return this.withEmptyState(this.source.listConnections().map((config) => ({
         kind: "connection",
         config,
         connected: this.source.isConnected(config.id),
         active: activeId === config.id
-      }));
+      })), "No DB connections");
     }
 
     if (element.kind === "group" && element.group === "ssh") {
-      return this.source.listSshConnections().map((conn) => ({ kind: "ssh", conn }));
+      return this.withEmptyState(this.source.listSshConnections().map((conn) => ({ kind: "ssh", conn })), "No SSH connections");
     }
 
     if (element.kind === "group" && element.group === "web") {
-      return this.source.listWebLinks().map((link) => ({ kind: "webLink", link }));
+      return this.withEmptyState(this.source.listWebLinks().map((link) => ({ kind: "webLink", link })), "No web links");
+    }
+
+    if (element.kind === "group" && element.group === "rest") {
+      const collections = await this.source.listRestCollections();
+      return this.withEmptyState(
+        collections.map((collection) => ({ kind: "restCollection", collection })),
+        "No REST collections"
+      );
     }
 
     if (element.kind === "group" && element.group === "vscode") {
-      return this.source.listVsCodeFavorites().map((favorite) => ({ kind: "vscodeFavorite", favorite }));
+      return this.withEmptyState(
+        this.source.listVsCodeFavorites().map((favorite) => ({ kind: "vscodeFavorite", favorite })),
+        "No favorites"
+      );
     }
 
     if (element.kind === "group" && element.group === "ollama") {
-      return this.source.listOllamaEndpoints().map((endpoint) => ({ kind: "ollama", endpoint }));
+      return this.withEmptyState(
+        this.source.listOllamaEndpoints().map((endpoint) => ({ kind: "ollama", endpoint })),
+        "No Ollama endpoints"
+      );
+    }
+
+    if (element.kind === "restCollection") {
+      const items = await this.source.listRestItems(element.collection.id);
+      return this.withEmptyState(items.map((item) =>
+        item.type === "folder"
+          ? { kind: "restFolder" as const, collectionId: element.collection.id, folder: item }
+          : { kind: "restRequest" as const, collectionId: element.collection.id, request: item }
+      ), "No requests or folders");
+    }
+
+    if (element.kind === "restFolder") {
+      const items = await this.source.listRestItems(element.collectionId, element.folder.id);
+      return this.withEmptyState(items.map((item) =>
+        item.type === "folder"
+          ? { kind: "restFolder" as const, collectionId: element.collectionId, folder: item }
+          : { kind: "restRequest" as const, collectionId: element.collectionId, request: item }
+      ), "No requests or folders");
     }
 
     if (element.kind === "ollama") {
       const models = await this.source.listOllamaModels(element.endpoint);
-      return models.map((model) => ({ kind: "ollamaModel", endpointId: element.endpoint.id, model }));
+      return this.withEmptyState(
+        models.map((model) => ({ kind: "ollamaModel", endpointId: element.endpoint.id, model })),
+        "No models"
+      );
     }
 
     if (element.kind === "connection") {
       const databases = await this.source.listDatabases(element.config);
-      return databases.map((db) => ({ kind: "database", connectionId: element.config.id, database: db }));
+      return this.withEmptyState(
+        databases.map((db) => ({ kind: "database", connectionId: element.config.id, database: db })),
+        "No databases"
+      );
     }
 
     if (element.kind === "database") {
@@ -301,14 +414,14 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
 
     if (element.kind === "sqlFolder") {
       const items = this.source.listFavoriteSql(element.connectionId, element.database);
-      return items.map((s) => ({
+      return this.withEmptyState(items.map((s) => ({
         kind: "sqlItem",
         connectionId: element.connectionId,
         database: element.database,
         id: s.id,
         name: s.name,
         sql: s.sql
-      }));
+      })), "No saved SQL");
     }
 
     return [];
