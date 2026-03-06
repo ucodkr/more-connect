@@ -9,8 +9,14 @@
   },
   "keywords": [
     "mysql",
+    "sqlite",
     "database",
-    "mariadb"
+    "oracle",
+    "mariadb",
+    "docker",
+    "ssh",
+    "rest api",
+    "llm"
   ],
   "scripts": {
     "vscode:prepublish": "npm run build",
