@@ -166,6 +166,55 @@ function extractRequest (collections: Collection[], requestId: string): RequestI
   return null;
 }
 
+function findFolder (collections: Collection[], folderId: string): FolderItem | null {
+  const walk = (items: Array<FolderItem | RequestItem>): FolderItem | null => {
+    for (const item of items) {
+      if (item.type !== "folder") continue;
+      if (item.id === folderId) return item;
+      const nested = walk(item.items || []);
+      if (nested) return nested;
+    }
+    return null;
+  };
+
+  for (const collection of collections) {
+    const found = walk(collection.items || []);
+    if (found) return found;
+  }
+  return null;
+}
+
+function extractFolder (collections: Collection[], folderId: string): FolderItem | null {
+  const walk = (items: Array<FolderItem | RequestItem>): FolderItem | null => {
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type !== "folder") continue;
+      if (item.id === folderId) {
+        items.splice(i, 1);
+        return item;
+      }
+      const nested = walk(item.items || []);
+      if (nested) return nested;
+    }
+    return null;
+  };
+
+  for (const collection of collections) {
+    const found = walk(collection.items || []);
+    if (found) return found;
+  }
+  return null;
+}
+
+function folderContainsFolderId (folder: FolderItem, folderId: string): boolean {
+  for (const item of folder.items || []) {
+    if (item.type !== "folder") continue;
+    if (item.id === folderId) return true;
+    if (folderContainsFolderId(item, folderId)) return true;
+  }
+  return false;
+}
+
 function cloneRequest (req: RequestItem): RequestItem {
   const copy = JSON.parse(JSON.stringify(req)) as RequestItem;
   copy.id = uid("req");
@@ -737,9 +786,71 @@ export class RestViewProvider implements vscode.WebviewViewProvider {
     this.ensureRequestPanel();
   }
 
+  async renameCollection (collectionId: string, currentName: string): Promise<void> {
+    await this.ensureStateLoaded();
+    const name = await vscode.window.showInputBox({ prompt: "Collection name", value: currentName });
+    if (!name) return;
+    await this.onMessage({ type: "updateCollectionName", collectionId, name });
+  }
+
+  async renameFolder (collectionId: string, folderId: string, currentName: string): Promise<void> {
+    await this.ensureStateLoaded();
+    const name = await vscode.window.showInputBox({ prompt: "Folder name", value: currentName });
+    if (!name) return;
+    await this.onMessage({ type: "updateFolderName", collectionId, folderId, name });
+  }
+
+  async renameRequest (requestId: string, currentName: string): Promise<void> {
+    await this.ensureStateLoaded();
+    const name = await vscode.window.showInputBox({ prompt: "Request name", value: currentName });
+    if (!name) return;
+    await this.onMessage({ type: "updateRequestName", requestId, name });
+  }
+
   async moveCollectionBefore (collectionId: string, targetCollectionId?: string): Promise<void> {
     await this.ensureStateLoaded();
     await this.onMessage({ type: "moveCollection", collectionId, targetCollectionId });
+  }
+
+  async moveRequestTo (requestId: string, collectionId: string, targetFolderId?: string): Promise<void> {
+    await this.ensureStateLoaded();
+    await this.onMessage({ type: "moveRequest", requestId, collectionId, targetFolderId });
+  }
+
+  async moveFolderTo (folderId: string, collectionId: string, targetFolderId?: string): Promise<void> {
+    await this.ensureStateLoaded();
+    const targetCollection = this.state.collections.find((item) => item.id === collectionId);
+    if (!targetCollection) {
+      this.notify("error", "Target collection not found.");
+      return;
+    }
+    if (targetFolderId === folderId) return;
+
+    const sourceFolder = findFolder(this.state.collections, folderId);
+    if (!sourceFolder) {
+      this.notify("error", "Folder not found.");
+      return;
+    }
+    if (targetFolderId && folderContainsFolderId(sourceFolder, targetFolderId)) {
+      this.notify("error", "Cannot move a folder into its child folder.");
+      return;
+    }
+
+    const folder = extractFolder(this.state.collections, folderId);
+    if (!folder) {
+      this.notify("error", "Folder not found.");
+      return;
+    }
+
+    const targetItems = findItemsContainer(targetCollection, targetFolderId);
+    if (!targetItems) {
+      this.notify("error", "Target folder not found.");
+      return;
+    }
+
+    targetItems.push(folder);
+    await this.saveState();
+    this.postState();
   }
 
   async duplicateCollection (collectionId: string): Promise<void> {
@@ -1222,7 +1333,6 @@ export class RestViewProvider implements vscode.WebviewViewProvider {
         if (toIdx < 0) {
           this.state.collections.push(col);
         } else {
-          if (fromIdx < toIdx) toIdx -= 1;
           this.state.collections.splice(toIdx, 0, col);
         }
         await this.saveState();

@@ -190,14 +190,29 @@
         "icon": "$(copy)"
       },
       {
+        "command": "moreConnect.renameRestCollection",
+        "title": "More Connect: Rename REST Collection",
+        "icon": "$(edit)"
+      },
+      {
         "command": "moreConnect.duplicateRestRequest",
         "title": "More Connect: Duplicate REST Request",
         "icon": "$(copy)"
       },
       {
+        "command": "moreConnect.renameRestRequest",
+        "title": "More Connect: Rename REST Request",
+        "icon": "$(edit)"
+      },
+      {
         "command": "moreConnect.duplicateRestFolder",
         "title": "More Connect: Duplicate REST Folder",
         "icon": "$(copy)"
+      },
+      {
+        "command": "moreConnect.renameRestFolder",
+        "title": "More Connect: Rename REST Folder",
+        "icon": "$(edit)"
       },
       {
         "command": "moreConnect.removeRestItem",
@@ -512,6 +527,11 @@
           "group": "navigation"
         },
         {
+          "command": "moreConnect.renameRestCollection",
+          "when": "view == moreConnectConnections && viewItem == restCollection",
+          "group": "navigation"
+        },
+        {
           "command": "moreConnect.removeRestItem",
           "when": "view == moreConnectConnections && viewItem == restCollection",
           "group": "navigation"
@@ -532,6 +552,11 @@
           "group": "navigation"
         },
         {
+          "command": "moreConnect.renameRestFolder",
+          "when": "view == moreConnectConnections && viewItem == restFolder",
+          "group": "navigation"
+        },
+        {
           "command": "moreConnect.duplicateRestFolder",
           "when": "view == moreConnectConnections && viewItem == restFolder",
           "group": "navigation"
@@ -548,6 +573,11 @@
         },
         {
           "command": "moreConnect.duplicateRestRequest",
+          "when": "view == moreConnectConnections && viewItem == restRequest",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.renameRestRequest",
           "when": "view == moreConnectConnections && viewItem == restRequest",
           "group": "navigation"
         },

@@ -234,6 +234,8 @@ export async function activate(context: vscode.ExtensionContext) {
           if (n.kind === "ssh") return { kind: "ssh", id: n.conn.id };
           if (n.kind === "webLink") return { kind: "web", id: n.link.id };
           if (n.kind === "restCollection") return { kind: "rest", id: n.collection.id };
+          if (n.kind === "restFolder") return { kind: "restFolder", id: n.folder.id, collectionId: n.collectionId };
+          if (n.kind === "restRequest") return { kind: "restRequest", id: n.request.id, collectionId: n.collectionId };
           if (n.kind === "vscodeFavorite") return { kind: "vscode", id: n.favorite.id };
           if (n.kind === "ollama") return { kind: "ollama", id: n.endpoint.id };
           return;
@@ -245,7 +247,10 @@ export async function activate(context: vscode.ExtensionContext) {
     handleDrop: async (target, dataTransfer) => {
       const raw = dataTransfer.get(DND_MIME)?.value;
       if (typeof raw !== "string") return;
-      let dragged: Array<{ kind: "db" | "ssh" | "web" | "rest" | "vscode" | "ollama"; id: string }> = [];
+      let dragged: Array<
+        | { kind: "db" | "ssh" | "web" | "rest" | "vscode" | "ollama"; id: string }
+        | { kind: "restFolder" | "restRequest"; id: string; collectionId: string }
+      > = [];
       try {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) dragged = parsed;
@@ -268,12 +273,22 @@ export async function activate(context: vscode.ExtensionContext) {
                 ? "web"
                 : target?.kind === "restCollection"
                   ? "rest"
+                : target?.kind === "restFolder"
+                  ? "restFolder"
+                : target?.kind === "restRequest"
+                  ? "restRequest"
                 : target?.kind === "vscodeFavorite"
                   ? "vscode"
                 : target?.kind === "ollama"
                   ? "ollama"
               : undefined;
-      if (!targetKind || targetKind !== dragKind) return;
+      const restFolderDrop =
+        dragKind === "restFolder" &&
+        (target?.kind === "restCollection" || target?.kind === "restFolder");
+      const restRequestDrop =
+        dragKind === "restRequest" &&
+        (target?.kind === "restCollection" || target?.kind === "restFolder");
+      if (!targetKind || (targetKind !== dragKind && !restFolderDrop && !restRequestDrop)) return;
 
       const insertBeforeId =
         dragKind === "db"
@@ -292,6 +307,8 @@ export async function activate(context: vscode.ExtensionContext) {
                 ? target?.kind === "restCollection"
                   ? target.collection.id
                   : undefined
+              : dragKind === "restFolder" || dragKind === "restRequest"
+                ? undefined
               : dragKind === "vscode"
                 ? target?.kind === "vscodeFavorite"
                   ? target.favorite.id
@@ -328,6 +345,24 @@ export async function activate(context: vscode.ExtensionContext) {
         const movedIds = dragged.map((d) => d.id);
         for (const id of movedIds) {
           await restProvider.moveCollectionBefore(id, insertBeforeId);
+        }
+      } else if (dragKind === "restFolder") {
+        const targetCollectionId =
+          target?.kind === "restCollection" ? target.collection.id : target?.kind === "restFolder" ? target.collectionId : undefined;
+        const targetFolderId = target?.kind === "restFolder" ? target.folder.id : undefined;
+        if (!targetCollectionId) return;
+        for (const item of dragged) {
+          if (item.kind !== "restFolder") continue;
+          await restProvider.moveFolderTo(item.id, targetCollectionId, targetFolderId);
+        }
+      } else if (dragKind === "restRequest") {
+        const targetCollectionId =
+          target?.kind === "restCollection" ? target.collection.id : target?.kind === "restFolder" ? target.collectionId : undefined;
+        const targetFolderId = target?.kind === "restFolder" ? target.folder.id : undefined;
+        if (!targetCollectionId) return;
+        for (const item of dragged) {
+          if (item.kind !== "restRequest") continue;
+          await restProvider.moveRequestTo(item.id, targetCollectionId, targetFolderId);
         }
       } else if (dragKind === "vscode") {
         const all = vsCodeFavoriteStore.list();
@@ -2361,13 +2396,25 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
       if (node?.kind !== "restCollection") return;
       await restProvider.duplicateCollection(node.collection.id);
     }),
+    vscode.commands.registerCommand("moreConnect.renameRestCollection", async (node?: ExplorerNode) => {
+      if (node?.kind !== "restCollection") return;
+      await restProvider.renameCollection(node.collection.id, node.collection.name);
+    }),
     vscode.commands.registerCommand("moreConnect.duplicateRestRequest", async (node?: ExplorerNode) => {
       if (node?.kind !== "restRequest") return;
       await restProvider.duplicateRequest(node.request.id);
     }),
+    vscode.commands.registerCommand("moreConnect.renameRestRequest", async (node?: ExplorerNode) => {
+      if (node?.kind !== "restRequest") return;
+      await restProvider.renameRequest(node.request.id, node.request.name);
+    }),
     vscode.commands.registerCommand("moreConnect.duplicateRestFolder", async (node?: ExplorerNode) => {
       if (node?.kind !== "restFolder") return;
       await restProvider.duplicateFolder(node.collectionId, node.folder.id);
+    }),
+    vscode.commands.registerCommand("moreConnect.renameRestFolder", async (node?: ExplorerNode) => {
+      if (node?.kind !== "restFolder") return;
+      await restProvider.renameFolder(node.collectionId, node.folder.id, node.folder.name);
     }),
     vscode.commands.registerCommand("moreConnect.removeRestItem", async (node?: ExplorerNode) => {
       if (!node) return;
