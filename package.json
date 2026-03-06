@@ -36,6 +36,7 @@
     "onCommand:moreConnect.openRestClient",
     "onCommand:moreConnect.addRestCollection",
     "onCommand:moreConnect.addRestRequest",
+    "onCommand:moreConnect.addDockerHost",
     "onView:moreConnectConnections"
   ],
   "main": "./dist/extension.js",
@@ -143,6 +144,51 @@
         "command": "moreConnect.addWebLink",
         "title": "More Connect: Add Web Link",
         "icon": "$(add)"
+      },
+      {
+        "command": "moreConnect.addDockerHost",
+        "title": "More Connect: Add Docker Host",
+        "icon": "$(add)"
+      },
+      {
+        "command": "moreConnect.editDockerHost",
+        "title": "More Connect: Edit Docker Host",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "moreConnect.removeDockerHost",
+        "title": "More Connect: Remove Docker Host",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "moreConnect.refreshDockerHost",
+        "title": "More Connect: Refresh Docker Host",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "moreConnect.openDockerContainerShell",
+        "title": "More Connect: Open Docker Container Shell",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "moreConnect.startDockerContainer",
+        "title": "More Connect: Start Docker Container",
+        "icon": "$(play)"
+      },
+      {
+        "command": "moreConnect.stopDockerContainer",
+        "title": "More Connect: Stop Docker Container",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "moreConnect.removeDockerContainer",
+        "title": "More Connect: Remove Docker Container",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "moreConnect.removeDockerImage",
+        "title": "More Connect: Remove Docker Image",
+        "icon": "$(trash)"
       },
       {
         "command": "moreConnect.openRestClient",
@@ -482,6 +528,11 @@
           "group": "inline"
         },
         {
+          "command": "moreConnect.addDockerHost",
+          "when": "view == moreConnectConnections && viewItem == dockerGroup",
+          "group": "inline"
+        },
+        {
           "command": "moreConnect.addVsCodeFavorite",
           "when": "view == moreConnectConnections && viewItem == vscodeGroup",
           "group": "inline"
@@ -584,6 +635,46 @@
         {
           "command": "moreConnect.removeRestItem",
           "when": "view == moreConnectConnections && viewItem == restRequest",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.refreshDockerHost",
+          "when": "view == moreConnectConnections && viewItem == dockerHost",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.editDockerHost",
+          "when": "view == moreConnectConnections && viewItem == dockerHost",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.removeDockerHost",
+          "when": "view == moreConnectConnections && viewItem == dockerHost",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.openDockerContainerShell",
+          "when": "view == moreConnectConnections && viewItem == dockerContainerRunning",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.stopDockerContainer",
+          "when": "view == moreConnectConnections && viewItem == dockerContainerRunning",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.startDockerContainer",
+          "when": "view == moreConnectConnections && viewItem == dockerContainerStopped",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.removeDockerContainer",
+          "when": "view == moreConnectConnections && (viewItem == dockerContainerRunning || viewItem == dockerContainerStopped)",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.removeDockerImage",
+          "when": "view == moreConnectConnections && viewItem == dockerImage",
           "group": "navigation"
         },
         {

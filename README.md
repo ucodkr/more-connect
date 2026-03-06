@@ -1,49 +1,136 @@
-# More Connect (VS Code Extension)
+# More Connect
 
-MySQL/MariaDB/PostgreSQL/SQLite/Oracle/Redis에 연결하고 쿼리를 실행하는 간단한 DB 클라이언트 확장입니다.
+More Connect is a VS Code extension for working with databases, servers, REST APIs, Docker hosts, web links, and local development tools from one sidebar.
 
-## Features
-- 연결 추가/삭제, 연결/해제
-- 쿼리 실행 (입력창) + 결과 테이블 뷰
-- 에디터 선택영역(또는 현재 라인) 쿼리 실행
-- 비밀번호는 VS Code Secret Storage에 저장
-- Redis는 별도 패키지 없이(순수 TS + RESP) 연결
-- SQLite/Oracle은 런타임 의존성이 필요할 수 있음 (아래 참고)
-- Ollama 엔드포인트 관리 (추가/수정/삭제)
-- Ollama 모델 목록/모델 Pull/모델 삭제/모델명 복사
-- Ollama 채팅 (스트리밍 응답, 중지, 모델 전환)
-- Ollama 모델 정보 보기 (size/context/params/quantization 등)
-- Ollama 모델별 채팅 세션 저장 및 세션별 다시 불러오기
-- Ollama 채팅 응답 메타 표시 (입력 토큰/출력 토큰/처리시간)
-- Ollama 채팅 Markdown 렌더링 (헤더, 표, 코드블록, 링크, 리스트/인용)
-- VS Code 열기 즐겨찾기 (현재 워크스페이스/폴더/워크스페이스 파일/입력 경로 추가)
-- VS Code 즐겨찾기 수정/삭제 및 새 VS Code 창으로 열기
+It is designed for developers who want quick access to connection targets and common actions without leaving VS Code.
 
-## Notes (Drivers)
-- `Redis`: 확장에 내장(추가 설치 불필요)
-- `SQLite`: 필요 시 `sqlite3`를 확장 global storage에 설치합니다: `npm i --prefix "<globalStorage>/drivers" sqlite3`
-- `Oracle`: 필요 시 `oracledb`(node-oracledb)를 확장 global storage에 설치합니다: `npm i --prefix "<globalStorage>/drivers" oracledb` (Thin 모드로는 Instant Client 없이도 접속 가능)
+## Main Features
 
-## Usage
-1. `npm i`
-2. `npm run build`
-3. VS Code에서 `Run and Debug` → `Run Extension`
-4. Explorer의 `More Connect` 뷰에서 연결 추가 후 쿼리 실행
+### Database Connections
 
-## Publish (VSCE / PAT)
-- `vsce publish` 실패 시 `The Personal Access Token used has expired.` 에러가 나오면, 기존 PAT 만료 연장은 불가하며 **새 PAT 발급 후 교체**해야 합니다.
-- 기본 절차:
-  1. Azure DevOps 로그인: `https://dev.azure.com`
-  2. PAT 생성 페이지: `https://dev.azure.com/<조직명>/_usersSettings/tokens`
-  3. 새 토큰 생성(만료 기간/권한 설정) 후 복사
-     - 필수 권한: **Marketplace > Manage**
-  4. 로컬 갱신:
-     - `vsce logout ucodkr`
-     - `vsce login ucodkr`
-  5. 재배포: `npx vsce publish`
+More Connect supports:
 
-### 토큰 페이지 접속이 안 될 때
-- 퍼블리셔 소유 계정(`ucodkr`)과 동일한 Microsoft 계정으로 로그인했는지 확인
-- 시크릿 모드에서 `https://dev.azure.com` 먼저 로그인 후 토큰 페이지 접근
-- 조직 미존재/권한 없음 상태인지 확인(조직 생성 또는 초대 필요)
-- 사내망/보안 정책으로 `dev.azure.com` 차단 여부 확인(개인망으로 테스트)
+- MySQL
+- MariaDB
+- PostgreSQL
+- SQLite
+- Oracle
+- Redis
+
+With the database explorer you can:
+
+- Add, edit, duplicate, reorder, and remove connections
+- Connect and disconnect from saved databases
+- Browse databases and tables
+- Run SQL from the editor or from saved snippets
+- Preview table data
+- Save favorite SQL per connection and database
+
+Passwords are stored in VS Code Secret Storage.
+
+## SSH Connections
+
+Manage SSH targets directly from the sidebar.
+
+- Add, edit, remove, and reorder SSH hosts
+- Import hosts from `~/.ssh/config`
+- Open an SSH terminal from a saved target
+
+## REST API Explorer
+
+More Connect includes a REST client and REST tree explorer.
+
+- Create collections, folders, and requests
+- Rename, duplicate, delete, and reorder REST items
+- Organize requests in a tree structure
+- Open and run REST requests inside VS Code
+- Manage environments and imported REST data
+
+## Docker Explorer
+
+Add Docker hosts and inspect resources from the sidebar.
+
+Supported host formats:
+
+- `unix:///var/run/docker.sock`
+- `ssh://...`
+- `tcp://...`
+
+For each Docker host, you can view:
+
+- Containers
+- Images
+- Volumes
+- Networks
+
+Container actions:
+
+- Open a shell inside a running container
+- Start a stopped container
+- Stop a running container
+- Force remove a container
+
+Image actions:
+
+- Force remove an image
+
+## LLM Endpoints
+
+The extension also supports local and remote LLM endpoints.
+
+- Manage Ollama and vLLM endpoints
+- Browse available models
+- Pull and delete Ollama models
+- Open chat sessions inside VS Code
+- View model information such as size, quantization, and context length
+- Save chat sessions by model
+
+## VS Code Favorites
+
+Save frequently used folders and workspace files for quick access.
+
+- Add folders or `.code-workspace` files
+- Open favorites in a new VS Code window
+- Manage saved entries from the sidebar
+
+## Web Links
+
+Keep useful development URLs in one place.
+
+- Save internal tools, dashboards, and documentation links
+- Open links quickly from the explorer
+
+## Storage
+
+Saved data can use a shared storage folder so connection information and related settings stay together.
+
+This includes:
+
+- Database connections
+- SSH connections
+- Web links
+- REST API data
+- Docker hosts
+- VS Code favorites
+- Ollama/vLLM endpoints
+
+## Sidebar Overview
+
+The More Connect sidebar includes:
+
+- DB Connections
+- SSH Connections
+- Web Links
+- REST APIs
+- Docker
+- Folder/Workspace Favorites
+- LLM (Ollama/vLLM)
+
+## Use Cases
+
+More Connect is useful when you want to:
+
+- query databases without leaving VS Code
+- keep SSH, REST, Docker, and database targets together
+- manage local development environments from one explorer
+- switch quickly between infrastructure, APIs, and data tools

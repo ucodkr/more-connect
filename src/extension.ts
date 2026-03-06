@@ -2,7 +2,22 @@ import * as vscode from "vscode";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import * as path from "node:path";
-import type { ConnectionConfig, DbType, LlmProvider, OllamaEndpoint, QueryResult, VsCodeFavorite } from "./types";
+import type { ConnectionConfig, DbType, DockerHost, LlmProvider, OllamaEndpoint, QueryResult, VsCodeFavorite } from "./types";
+import {
+  listDockerContainers,
+  listDockerImages,
+  listDockerNetworks,
+  listDockerVolumes,
+  removeDockerContainer,
+  removeDockerImage,
+  startDockerContainer,
+  stopDockerContainer,
+  type DockerContainerInfo,
+  type DockerImageInfo,
+  type DockerNetworkInfo,
+  type DockerVolumeInfo
+} from "./docker/dockerClient";
+import { DockerStore } from "./docker/dockerStore";
 import { ConnectionStore } from "./storage";
 import { createClient, type OptionalModuleLoader } from "./db/factory";
 import type { DbClient } from "./db/client";
@@ -56,6 +71,8 @@ export async function activate(context: vscode.ExtensionContext) {
   await vsCodeFavoriteStore.init();
   const ollamaStore = new OllamaStore(context);
   await ollamaStore.init();
+  const dockerStore = new DockerStore(context);
+  await dockerStore.init();
   const restProvider = new RestViewProvider(context);
   const output = vscode.window.createOutputChannel("More Connect");
   const ollamaChatPanel = new OllamaChatPanel(context, async (panelKey, msg) => {
@@ -136,6 +153,7 @@ export async function activate(context: vscode.ExtensionContext) {
       ssh: saved.ssh ?? true,
       web: saved.web ?? true,
       rest: saved.rest ?? true,
+      docker: saved.docker ?? true,
       vscode: saved.vscode ?? true,
       ollama: saved.ollama ?? true
     };
@@ -188,6 +206,11 @@ export async function activate(context: vscode.ExtensionContext) {
     listConnections: () => store.list(),
     listSshConnections: () => sshStore.list(),
     listWebLinks: () => webLinkStore.list(),
+    listDockerHosts: () => dockerStore.list(),
+    listDockerContainers: async (host) => await listDockerContainers(host),
+    listDockerImages: async (host) => await listDockerImages(host),
+    listDockerVolumes: async (host) => await listDockerVolumes(host),
+    listDockerNetworks: async (host) => await listDockerNetworks(host),
     listRestCollections: async () => await restProvider.listCollections(),
     listRestItems: async (collectionId, parentFolderId) => await restProvider.listItems(collectionId, parentFolderId),
     listVsCodeFavorites: () => vsCodeFavoriteStore.list(),
@@ -233,6 +256,7 @@ export async function activate(context: vscode.ExtensionContext) {
           if (n.kind === "connection") return { kind: "db", id: n.config.id };
           if (n.kind === "ssh") return { kind: "ssh", id: n.conn.id };
           if (n.kind === "webLink") return { kind: "web", id: n.link.id };
+          if (n.kind === "dockerHost") return { kind: "docker", id: n.host.id };
           if (n.kind === "restCollection") return { kind: "rest", id: n.collection.id };
           if (n.kind === "restFolder") return { kind: "restFolder", id: n.folder.id, collectionId: n.collectionId };
           if (n.kind === "restRequest") return { kind: "restRequest", id: n.request.id, collectionId: n.collectionId };
@@ -248,7 +272,7 @@ export async function activate(context: vscode.ExtensionContext) {
       const raw = dataTransfer.get(DND_MIME)?.value;
       if (typeof raw !== "string") return;
       let dragged: Array<
-        | { kind: "db" | "ssh" | "web" | "rest" | "vscode" | "ollama"; id: string }
+        | { kind: "db" | "ssh" | "web" | "docker" | "rest" | "vscode" | "ollama"; id: string }
         | { kind: "restFolder" | "restRequest"; id: string; collectionId: string }
       > = [];
       try {
@@ -271,6 +295,8 @@ export async function activate(context: vscode.ExtensionContext) {
               ? "ssh"
               : target?.kind === "webLink"
                 ? "web"
+                : target?.kind === "dockerHost"
+                  ? "docker"
                 : target?.kind === "restCollection"
                   ? "rest"
                 : target?.kind === "restFolder"
@@ -303,6 +329,10 @@ export async function activate(context: vscode.ExtensionContext) {
               ? target?.kind === "webLink"
                 ? target.link.id
                 : undefined
+              : dragKind === "docker"
+                ? target?.kind === "dockerHost"
+                  ? target.host.id
+                  : undefined
               : dragKind === "rest"
                 ? target?.kind === "restCollection"
                   ? target.collection.id
@@ -341,6 +371,14 @@ export async function activate(context: vscode.ExtensionContext) {
         const idx = insertBeforeId ? remaining.findIndex((c) => c.id === insertBeforeId) : -1;
         const next = idx >= 0 ? [...remaining.slice(0, idx), ...moved, ...remaining.slice(idx)] : [...remaining, ...moved];
         await webLinkStore.saveAll(next);
+      } else if (dragKind === "docker") {
+        const all = dockerStore.list();
+        const draggedIds = new Set(dragged.map((d) => d.id));
+        const remaining = all.filter((c) => !draggedIds.has(c.id));
+        const moved = all.filter((c) => draggedIds.has(c.id));
+        const idx = insertBeforeId ? remaining.findIndex((c) => c.id === insertBeforeId) : -1;
+        const next = idx >= 0 ? [...remaining.slice(0, idx), ...moved, ...remaining.slice(idx)] : [...remaining, ...moved];
+        await dockerStore.saveAll(next);
       } else if (dragKind === "rest") {
         const movedIds = dragged.map((d) => d.id);
         for (const id of movedIds) {
@@ -401,6 +439,53 @@ export async function activate(context: vscode.ExtensionContext) {
     } catch {
       return;
     }
+  }
+
+  function normalizeDockerHost(input: string): string | undefined {
+    const trimmed = input.trim();
+    if (!trimmed) return;
+    if (/^unix:\/\/\/.+/.test(trimmed)) return trimmed;
+    if (/^ssh:\/\/.+/.test(trimmed)) return trimmed;
+    if (/^tcp:\/\/.+/.test(trimmed)) return trimmed;
+    return;
+  }
+
+  function quoteShellArg(value: string): string {
+    return `'${value.replace(/'/g, `'\\''`)}'`;
+  }
+
+  async function promptDockerHost(existing?: DockerHost): Promise<DockerHost | undefined> {
+    const hostInput = await vscode.window.showInputBox({
+      title: existing ? `Edit Docker host: ${existing.name}` : "Add Docker host",
+      prompt: "Docker host (unix://, ssh://, tcp://)",
+      value: existing?.host ?? "unix:///var/run/docker.sock",
+      placeHolder: "unix:///var/run/docker.sock or ssh://user@host or tcp://host:2375",
+      ignoreFocusOut: true
+    });
+    if (hostInput === undefined) return;
+    const host = normalizeDockerHost(hostInput);
+    if (!host) {
+      vscode.window.showErrorMessage("Invalid Docker host. Use unix://, ssh://, or tcp://");
+      return;
+    }
+
+    const defaultName =
+      host === "unix:///var/run/docker.sock"
+        ? "Local Docker"
+        : host.replace(/^[a-z]+:\/\//i, "");
+    const nameInput = await vscode.window.showInputBox({
+      title: existing ? `Edit Docker host: ${existing.name}` : "Docker host name",
+      prompt: "Display name in the Docker view",
+      value: existing?.name ?? defaultName,
+      ignoreFocusOut: true
+    });
+    if (nameInput === undefined) return;
+
+    return {
+      id: existing?.id ?? randomUUID(),
+      name: nameInput.trim() || existing?.name || defaultName,
+      host
+    };
   }
 
   async function pickOrPromptWebLink(node?: ExplorerNode): Promise<{ name: string; url: string } | undefined> {
@@ -2459,6 +2544,7 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
         }`,
         `sshFile(if set): ${vscode.Uri.joinPath(sshStore.getFolderUri(), "more-connect-ssh.json").fsPath}`,
         `webLinksFile(if set): ${vscode.Uri.joinPath(webLinkStore.getFolderUri(), "more-connect-web-links.json").fsPath}`,
+        `dockerFile(if set): ${vscode.Uri.joinPath(dockerStore.getFolderUri(), "more-connect-docker.json").fsPath}`,
         `restFile(if set): ${vscode.Uri.joinPath(store.getFolderUri() ?? context.globalStorageUri, "more.rest.json").fsPath}`,
         `vscodeFavoritesFile(if set): ${vscode.Uri.joinPath(vsCodeFavoriteStore.getFolderUri(), "more-connect-vscode-favorites.json").fsPath}`,
         `ollamaFile(if set): ${vscode.Uri.joinPath(ollamaStore.getFolderUri(), "more-connect-ollama.json").fsPath}`
@@ -2486,6 +2572,7 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
       await store.setFolderUri(pick[0]);
       await sshStore.setFolderUri(pick[0]);
       await webLinkStore.setFolderUri(pick[0]);
+      await dockerStore.setFolderUri(pick[0]);
       await vsCodeFavoriteStore.setFolderUri(pick[0]);
       await ollamaStore.setFolderUri(pick[0]);
       await restProvider.setGlobalStorageFolder(pick[0]);
@@ -2640,6 +2727,98 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
       const link = node?.kind === "webLink" ? node.link : undefined;
       if (!link) return;
       await webLinkStore.saveAll(webLinkStore.list().filter((item) => item.id !== link.id));
+      view.refresh();
+    }),
+
+    vscode.commands.registerCommand("moreConnect.addDockerHost", async () => {
+      const next = await promptDockerHost();
+      if (!next) return;
+      await dockerStore.saveAll([...dockerStore.list(), next]);
+      view.refresh();
+    }),
+
+    vscode.commands.registerCommand("moreConnect.editDockerHost", async (node?: ExplorerNode) => {
+      const host = node?.kind === "dockerHost" ? node.host : undefined;
+      if (!host) return;
+      const updated = await promptDockerHost(host);
+      if (!updated) return;
+      await dockerStore.saveAll(dockerStore.list().map((item) => (item.id === host.id ? updated : item)));
+      view.refresh();
+    }),
+
+    vscode.commands.registerCommand("moreConnect.removeDockerHost", async (node?: ExplorerNode) => {
+      const host = node?.kind === "dockerHost" ? node.host : undefined;
+      if (!host) return;
+      const choice = await vscode.window.showWarningMessage(`Remove Docker host "${host.name}"?`, { modal: true }, "Remove");
+      if (choice !== "Remove") return;
+      await dockerStore.saveAll(dockerStore.list().filter((item) => item.id !== host.id));
+      view.refresh();
+    }),
+
+    vscode.commands.registerCommand("moreConnect.refreshDockerHost", async () => {
+      view.refresh();
+    }),
+
+    vscode.commands.registerCommand("moreConnect.openDockerContainerShell", async (node?: ExplorerNode) => {
+      if (node?.kind !== "dockerContainer") return;
+      const host = dockerStore.list().find((item) => item.id === node.hostId);
+      if (!host) return;
+      const hostArg = quoteShellArg(host.host);
+      const containerArg = quoteShellArg(node.container.id);
+      const terminal = vscode.window.createTerminal({
+        name: `Docker: ${node.container.name || node.container.id}`,
+        location: { viewColumn: vscode.ViewColumn.Active }
+      });
+      terminal.show(false);
+      terminal.sendText(
+        `docker --host ${hostArg} exec -it ${containerArg} /bin/bash || docker --host ${hostArg} exec -it ${containerArg} /bin/sh`,
+        true
+      );
+    }),
+
+    vscode.commands.registerCommand("moreConnect.startDockerContainer", async (node?: ExplorerNode) => {
+      if (node?.kind !== "dockerContainer") return;
+      const host = dockerStore.list().find((item) => item.id === node.hostId);
+      if (!host) return;
+      await startDockerContainer(host, node.container.id);
+      view.refresh();
+    }),
+
+    vscode.commands.registerCommand("moreConnect.stopDockerContainer", async (node?: ExplorerNode) => {
+      if (node?.kind !== "dockerContainer") return;
+      const host = dockerStore.list().find((item) => item.id === node.hostId);
+      if (!host) return;
+      await stopDockerContainer(host, node.container.id);
+      view.refresh();
+    }),
+
+    vscode.commands.registerCommand("moreConnect.removeDockerContainer", async (node?: ExplorerNode) => {
+      if (node?.kind !== "dockerContainer") return;
+      const host = dockerStore.list().find((item) => item.id === node.hostId);
+      if (!host) return;
+      const targetName = node.container.name || node.container.id;
+      const choice = await vscode.window.showWarningMessage(
+        `Force remove container "${targetName}"?`,
+        { modal: true },
+        "Remove"
+      );
+      if (choice !== "Remove") return;
+      await removeDockerContainer(host, node.container.id);
+      view.refresh();
+    }),
+
+    vscode.commands.registerCommand("moreConnect.removeDockerImage", async (node?: ExplorerNode) => {
+      if (node?.kind !== "dockerImage") return;
+      const host = dockerStore.list().find((item) => item.id === node.hostId);
+      if (!host) return;
+      const targetName = `${node.image.repository}:${node.image.tag}`;
+      const choice = await vscode.window.showWarningMessage(
+        `Force remove image "${targetName}"?`,
+        { modal: true },
+        "Remove"
+      );
+      if (choice !== "Remove") return;
+      await removeDockerImage(host, node.image.id);
       view.refresh();
     }),
 

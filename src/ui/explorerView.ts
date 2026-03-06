@@ -1,8 +1,9 @@
 import * as vscode from "vscode";
-import type { ConnectionConfig, OllamaEndpoint, SshConnection, VsCodeFavorite, WebLink } from "../types";
+import type { DockerCategory, DockerContainerInfo, DockerImageInfo, DockerNetworkInfo, DockerVolumeInfo } from "../docker/dockerClient";
+import type { ConnectionConfig, DockerHost, OllamaEndpoint, SshConnection, VsCodeFavorite, WebLink } from "../types";
 import type { Collection as RestCollection, FolderItem as RestFolderItem, RequestItem as RestRequestItem } from "../rest/models";
 
-export type ExplorerGroupName = "db" | "ssh" | "web" | "rest" | "ollama" | "vscode";
+export type ExplorerGroupName = "db" | "ssh" | "web" | "rest" | "docker" | "ollama" | "vscode";
 
 export type ExplorerNode =
   | {
@@ -59,6 +60,35 @@ export type ExplorerNode =
       link: WebLink;
     }
   | {
+      kind: "dockerHost";
+      host: DockerHost;
+    }
+  | {
+      kind: "dockerCategory";
+      hostId: string;
+      category: DockerCategory;
+    }
+  | {
+      kind: "dockerContainer";
+      hostId: string;
+      container: DockerContainerInfo;
+    }
+  | {
+      kind: "dockerImage";
+      hostId: string;
+      image: DockerImageInfo;
+    }
+  | {
+      kind: "dockerVolume";
+      hostId: string;
+      volume: DockerVolumeInfo;
+    }
+  | {
+      kind: "dockerNetwork";
+      hostId: string;
+      network: DockerNetworkInfo;
+    }
+  | {
       kind: "restCollection";
       collection: RestCollection;
     }
@@ -90,6 +120,11 @@ export type ExplorerDataSource = {
   listConnections(): ConnectionConfig[];
   listSshConnections(): SshConnection[];
   listWebLinks(): WebLink[];
+  listDockerHosts(): DockerHost[];
+  listDockerContainers(host: DockerHost): Promise<DockerContainerInfo[]>;
+  listDockerImages(host: DockerHost): Promise<DockerImageInfo[]>;
+  listDockerVolumes(host: DockerHost): Promise<DockerVolumeInfo[]>;
+  listDockerNetworks(host: DockerHost): Promise<DockerNetworkInfo[]>;
   listRestCollections(): Promise<RestCollection[]>;
   listRestItems(collectionId: string, parentFolderId?: string): Promise<Array<RestFolderItem | RestRequestItem>>;
   listVsCodeFavorites(): VsCodeFavorite[];
@@ -130,12 +165,14 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
             : element.group === "ssh"
               ? "SSH Connections"
               : element.group === "web"
-              ? "Web Links"
+                ? "Web Links"
               : element.group === "rest"
                 ? "REST APIs"
+              : element.group === "docker"
+                ? "Docker"
               : element.group === "vscode"
                   ? "Folder/ Worksapce Favorites"
-                : "Ollama";
+                : "LLM (Ollama/vLLM)";
         const item = new vscode.TreeItem(
           label,
           this.source.isGroupExpanded(element.group)
@@ -148,9 +185,11 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
             : element.group === "ssh"
               ? "sshGroup"
               : element.group === "web"
-              ? "webGroup"
+                ? "webGroup"
               : element.group === "rest"
                 ? "restGroup"
+              : element.group === "docker"
+                ? "dockerGroup"
               : element.group === "vscode"
                   ? "vscodeGroup"
                 : "ollamaGroup";
@@ -160,9 +199,11 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
             : element.group === "ssh"
               ? "terminal"
               : element.group === "web"
-              ? "globe"
+                ? "globe"
               : element.group === "rest"
                 ? "radio-tower"
+              : element.group === "docker"
+                ? "package"
               : element.group === "vscode"
                   ? "code"
                 : "hubot"
@@ -254,6 +295,70 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
         };
         return item;
       }
+      case "dockerHost": {
+        const item = new vscode.TreeItem(element.host.name, vscode.TreeItemCollapsibleState.Collapsed);
+        item.contextValue = "dockerHost";
+        item.description = element.host.host;
+        item.tooltip = element.host.host;
+        item.iconPath = new vscode.ThemeIcon("package");
+        return item;
+      }
+      case "dockerCategory": {
+        const label =
+          element.category === "containers"
+            ? "Containers"
+            : element.category === "images"
+              ? "Images"
+              : element.category === "volumes"
+                ? "Volumes"
+                : "Networks";
+        const iconId =
+          element.category === "containers"
+            ? "vm"
+            : element.category === "images"
+              ? "archive"
+              : element.category === "volumes"
+                ? "database"
+                : "type-hierarchy-sub";
+        const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Collapsed);
+        item.contextValue = "dockerCategory";
+        item.iconPath = new vscode.ThemeIcon(iconId);
+        return item;
+      }
+      case "dockerContainer": {
+        const item = new vscode.TreeItem(element.container.name || element.container.id, vscode.TreeItemCollapsibleState.None);
+        item.contextValue = element.container.state.toLowerCase() === "running" ? "dockerContainerRunning" : "dockerContainerStopped";
+        item.description = element.container.state || element.container.image;
+        item.tooltip = `${element.container.image}\n${element.container.status}`;
+        item.iconPath = new vscode.ThemeIcon("vm");
+        return item;
+      }
+      case "dockerImage": {
+        const item = new vscode.TreeItem(
+          `${element.image.repository}:${element.image.tag}`,
+          vscode.TreeItemCollapsibleState.None
+        );
+        item.contextValue = "dockerImage";
+        item.description = element.image.size;
+        item.tooltip = element.image.id;
+        item.iconPath = new vscode.ThemeIcon("archive");
+        return item;
+      }
+      case "dockerVolume": {
+        const item = new vscode.TreeItem(element.volume.name, vscode.TreeItemCollapsibleState.None);
+        item.contextValue = "dockerVolume";
+        item.description = `${element.volume.driver}${element.volume.scope ? ` • ${element.volume.scope}` : ""}`;
+        item.iconPath = new vscode.ThemeIcon("database");
+        return item;
+      }
+      case "dockerNetwork": {
+        const item = new vscode.TreeItem(element.network.name, vscode.TreeItemCollapsibleState.None);
+        item.contextValue = "dockerNetwork";
+        item.description = `${element.network.driver}${element.network.scope ? ` • ${element.network.scope}` : ""}`;
+        item.tooltip = element.network.id;
+        item.iconPath = new vscode.ThemeIcon("type-hierarchy-sub");
+        return item;
+      }
       case "restCollection": {
         const item = new vscode.TreeItem(element.collection.name, vscode.TreeItemCollapsibleState.Collapsed);
         item.contextValue = "restCollection";
@@ -315,9 +420,10 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
         { kind: "group", group: "ssh" },
         { kind: "group", group: "web" },
         { kind: "group", group: "rest" },
+        { kind: "group", group: "docker" },
         { kind: "group", group: "vscode" },
         { kind: "group", group: "ollama" },
-    
+        { kind: "versionInfo", label: this.source.getVersionLabel() }
       ];
     }
 
@@ -347,6 +453,13 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
       );
     }
 
+    if (element.kind === "group" && element.group === "docker") {
+      return this.withEmptyState(
+        this.source.listDockerHosts().map((host) => ({ kind: "dockerHost", host })),
+        "No Docker hosts"
+      );
+    }
+
     if (element.kind === "group" && element.group === "vscode") {
       return this.withEmptyState(
         this.source.listVsCodeFavorites().map((favorite) => ({ kind: "vscodeFavorite", favorite })),
@@ -358,6 +471,58 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
       return this.withEmptyState(
         this.source.listOllamaEndpoints().map((endpoint) => ({ kind: "ollama", endpoint })),
         "No Ollama endpoints"
+      );
+    }
+
+    if (element.kind === "dockerHost") {
+      return [
+        { kind: "dockerCategory", hostId: element.host.id, category: "containers" },
+        { kind: "dockerCategory", hostId: element.host.id, category: "images" },
+        { kind: "dockerCategory", hostId: element.host.id, category: "volumes" },
+        { kind: "dockerCategory", hostId: element.host.id, category: "networks" }
+      ];
+    }
+
+    if (element.kind === "dockerCategory") {
+      const host = this.source.listDockerHosts().find((item) => item.id === element.hostId);
+      if (!host) return [];
+      if (element.category === "containers") {
+        return this.withEmptyState(
+          (await this.source.listDockerContainers(host)).map((container) => ({
+            kind: "dockerContainer" as const,
+            hostId: host.id,
+            container
+          })),
+          "No containers"
+        );
+      }
+      if (element.category === "images") {
+        return this.withEmptyState(
+          (await this.source.listDockerImages(host)).map((image) => ({
+            kind: "dockerImage" as const,
+            hostId: host.id,
+            image
+          })),
+          "No images"
+        );
+      }
+      if (element.category === "volumes") {
+        return this.withEmptyState(
+          (await this.source.listDockerVolumes(host)).map((volume) => ({
+            kind: "dockerVolume" as const,
+            hostId: host.id,
+            volume
+          })),
+          "No volumes"
+        );
+      }
+      return this.withEmptyState(
+        (await this.source.listDockerNetworks(host)).map((network) => ({
+          kind: "dockerNetwork" as const,
+          hostId: host.id,
+          network
+        })),
+        "No networks"
       );
     }
 

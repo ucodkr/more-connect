@@ -40,6 +40,12 @@ export type WebLink = {
   url: string;
 };
 
+export type DockerHost = {
+  id: string;
+  name: string;
+  host: string;
+};
+
 export type LlmProvider = "ollama" | "vllm";
 
 export type OllamaEndpoint = {
