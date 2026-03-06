@@ -177,7 +177,7 @@
       {
         "command": "moreConnect.addRestRequest",
         "title": "More Connect: Add REST Request",
-        "icon": "$(radio-tower)"
+        "icon": "$(new-file)"
       },
       {
         "command": "moreConnect.openRestRequest",
