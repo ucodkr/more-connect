@@ -102,6 +102,11 @@
         "icon": "$(sync)"
       },
       {
+        "command": "moreConnect.refreshDatabase",
+        "title": "More Connect: Reload Database",
+        "icon": "$(sync)"
+      },
+      {
         "command": "moreConnect.previewTable",
         "title": "More Connect: Preview Table",
         "icon": "$(table)"
@@ -397,6 +402,16 @@
         "icon": "$(info)"
       },
       {
+        "command": "moreConnect.exportMysqlDatabaseViaDocker",
+        "title": "More Connect: Export MySQL Database via Docker",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "moreConnect.importMysqlDatabaseViaDocker",
+        "title": "More Connect: Import MySQL Database via Docker",
+        "icon": "$(cloud-upload)"
+      },
+      {
         "command": "moreConnect.showTableInfo",
         "title": "More Connect: Table Info",
         "icon": "$(info)"
@@ -685,18 +700,33 @@
         },
         {
           "command": "moreConnect.newSql",
-          "when": "view == moreConnectConnections && (viewItem == connection || viewItem == connectionConnected || viewItem == database || viewItem == table)",
+          "when": "view == moreConnectConnections && (viewItem == connection || viewItem == connectionConnected || viewItem == database || viewItem == databaseMysql || viewItem == databaseMariaDb || viewItem == table)",
           "group": "navigation"
         },
         {
           "command": "moreConnect.openSavedSql",
-          "when": "view == moreConnectConnections && (viewItem == connection || viewItem == connectionConnected || viewItem == database || viewItem == table)",
+          "when": "view == moreConnectConnections && (viewItem == connection || viewItem == connectionConnected || viewItem == database || viewItem == databaseMysql || viewItem == databaseMariaDb || viewItem == table)",
           "group": "navigation"
         },
         {
           "command": "moreConnect.showDatabaseInfo",
-          "when": "view == moreConnectConnections && viewItem == database",
+          "when": "view == moreConnectConnections && (viewItem == database || viewItem == databaseMysql || viewItem == databaseMariaDb)",
           "group": "inline"
+        },
+        {
+          "command": "moreConnect.refreshDatabase",
+          "when": "view == moreConnectConnections && (viewItem == database || viewItem == databaseMysql || viewItem == databaseMariaDb)",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.exportMysqlDatabaseViaDocker",
+          "when": "view == moreConnectConnections && (viewItem == databaseMysql || viewItem == databaseMariaDb)",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.importMysqlDatabaseViaDocker",
+          "when": "view == moreConnectConnections && (viewItem == databaseMysql || viewItem == databaseMariaDb)",
+          "group": "navigation"
         },
         {
           "command": "moreConnect.connect",
@@ -856,6 +886,16 @@
         },
         {
           "command": "moreConnect.generateTableDdl",
+          "when": "view == moreConnectConnections && viewItem == table",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.exportMysqlDatabaseViaDocker",
+          "when": "view == moreConnectConnections && viewItem == table",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.importMysqlDatabaseViaDocker",
           "when": "view == moreConnectConnections && viewItem == table",
           "group": "navigation"
         }

@@ -192,6 +192,7 @@ export async function activate(context: vscode.ExtensionContext) {
   }
 
   sqlController = createSqlController({
+    context,
     store,
     output,
     resultsPanel,
@@ -300,6 +301,8 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("moreConnect.showDatabaseInfo", sqlController.showDatabaseInfo),
     vscode.commands.registerCommand("moreConnect.showTableInfo", sqlController.showTableInfo),
     vscode.commands.registerCommand("moreConnect.generateTableDdl", sqlController.generateTableDdl),
+    vscode.commands.registerCommand("moreConnect.exportMysqlDatabaseViaDocker", sqlController.exportMysqlDatabaseViaDocker),
+    vscode.commands.registerCommand("moreConnect.importMysqlDatabaseViaDocker", sqlController.importMysqlDatabaseViaDocker),
     vscode.commands.registerCommand("moreConnect.runFavoriteSql", sqlController.runFavoriteSql),
     vscode.window.onDidChangeActiveTextEditor(() => sqlController.updateSqlStatus()),
     vscode.workspace.onDidCloseTextDocument(() => sqlController.updateSqlStatus()),

@@ -202,6 +202,11 @@ export function registerConnectionCommands(
         return;
       }
       deps.view.refresh();
+    }),
+
+    vscode.commands.registerCommand("moreConnect.refreshDatabase", async (node?: ExplorerNode) => {
+      if (node?.kind !== "database") return;
+      deps.view.refresh(node);
     })
   );
 }

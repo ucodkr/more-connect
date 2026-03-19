@@ -238,7 +238,9 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
       }
       case "database": {
         const item = new vscode.TreeItem(element.database, vscode.TreeItemCollapsibleState.Collapsed);
-        item.contextValue = "database";
+        const config = this.source.listConnections().find((c) => c.id === element.connectionId);
+        item.contextValue =
+          config?.type === "mysql" ? "databaseMysql" : config?.type === "mariadb" ? "databaseMariaDb" : "database";
         item.iconPath = new vscode.ThemeIcon("database");
         return item;
       }

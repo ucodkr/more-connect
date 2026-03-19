@@ -1,4 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { execFile, spawn } from "node:child_process";
+import { createReadStream, createWriteStream } from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { pipeline } from "node:stream/promises";
+import { promisify } from "node:util";
 import * as vscode from "vscode";
 import { RedisClient } from "../db/redisClient";
 import {
@@ -23,6 +29,7 @@ import type { SavedSql, SqlFileContext } from "./state";
 import type { DbRuntime } from "./dbRuntime";
 
 type SqlControllerDeps = {
+  context: vscode.ExtensionContext;
   store: ConnectionStore;
   output: vscode.OutputChannel;
   resultsPanel: ResultsPanel;
@@ -38,6 +45,9 @@ type SqlControllerDeps = {
   listSavedSql(): SavedSql[];
   upsertSavedSql(entry: Omit<SavedSql, "updatedAt"> & { updatedAt?: number }): Promise<void>;
 };
+
+const execFileAsync = promisify(execFile);
+const MYSQL_DOCKER_IMAGE = "mariadb:11";
 
 export function createSqlController(deps: SqlControllerDeps) {
   function postResultsStatus(text: string): void {
@@ -111,6 +121,353 @@ export function createSqlController(deps: SqlControllerDeps) {
     sqlStatus.text = `$(database) ${effectiveConn.name}${dbPart}`;
     sqlStatus.tooltip = `SQL context\nConnection: ${effectiveConn.name}\nDatabase: ${effectiveDb ?? "(default)"}\n\nClick to change connection.`;
     sqlStatus.show();
+  }
+
+  function getMysqlDatabaseContext(node?: ExplorerNode): { config: ConnectionConfig; database: string } | undefined {
+    if (!node || node.kind !== "database") return;
+    const config = deps.store.list().find((c) => c.id === node.connectionId);
+    if (!config || (config.type !== "mysql" && config.type !== "mariadb")) return;
+    return { config, database: node.database };
+  }
+
+  function getMysqlExportContext(
+    node?: ExplorerNode
+  ): { config: ConnectionConfig; database: string; table?: string; schema?: string } | undefined {
+    if (!node) return;
+    if (node.kind === "database") {
+      const config = deps.store.list().find((c) => c.id === node.connectionId);
+      if (!config || (config.type !== "mysql" && config.type !== "mariadb")) return;
+      return { config, database: node.database };
+    }
+    if (node.kind === "table") {
+      const config = deps.store.list().find((c) => c.id === node.connectionId);
+      if (!config || (config.type !== "mysql" && config.type !== "mariadb")) return;
+      return { config, database: node.database, table: node.table, schema: node.schema };
+    }
+    return;
+  }
+
+  async function ensureConnectionPassword(config: ConnectionConfig): Promise<string | undefined> {
+    const key = `moreConnect.password.${config.id}`;
+    const existing = await deps.context.secrets.get(key);
+    if (existing !== undefined) return existing;
+
+    const password = await vscode.window.showInputBox({
+      title: `Password for ${config.name}`,
+      password: true,
+      ignoreFocusOut: true
+    });
+    if (password === undefined) return;
+    if (password.trim().length === 0) {
+      vscode.window.showInformationMessage("Password is required.");
+      return;
+    }
+    await deps.context.secrets.store(key, password);
+    return password;
+  }
+
+  async function ensureDockerInstalled(): Promise<boolean> {
+    try {
+      const { stdout, stderr } = await execFileAsync("docker", ["--version"], {
+        env: process.env,
+        maxBuffer: 1024 * 1024
+      });
+      deps.output.appendLine(`[Docker] ${String(stdout || stderr).trim() || "docker --version OK"}`);
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      vscode.window.showErrorMessage(`Docker is not installed or not available in PATH: ${message}`);
+      return false;
+    }
+  }
+
+  async function spawnDockerToFile(args: string[], password: string, targetPath: string): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn("docker", args, {
+        env: { ...process.env, MYSQL_PWD: password },
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+      const stderrChunks: Buffer[] = [];
+      let exitCode: number | null = null;
+      let pipeDone = false;
+
+      const finish = () => {
+        if (exitCode === null || !pipeDone) return;
+        if (exitCode === 0) {
+          resolve();
+          return;
+        }
+        const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
+        reject(new Error(stderr || `docker exited with code ${exitCode}`));
+      };
+
+      child.stderr.on("data", (chunk) => stderrChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk))));
+      child.on("error", reject);
+      pipeline(child.stdout, createWriteStream(targetPath))
+        .then(() => {
+          pipeDone = true;
+          finish();
+        })
+        .catch(reject);
+      child.on("close", (code) => {
+        exitCode = code;
+        finish();
+      });
+    });
+  }
+
+  async function spawnDockerFromFile(args: string[], password: string, sourcePath: string): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn("docker", args, {
+        env: { ...process.env, MYSQL_PWD: password },
+        stdio: ["pipe", "pipe", "pipe"]
+      });
+      const stderrChunks: Buffer[] = [];
+      const stdoutChunks: Buffer[] = [];
+      let stdinDone = false;
+      let exitCode: number | null = null;
+
+      const finish = () => {
+        if (exitCode === null || !stdinDone) return;
+        if (exitCode === 0) {
+          resolve();
+          return;
+        }
+        const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
+        const stdout = Buffer.concat(stdoutChunks).toString("utf8").trim();
+        reject(new Error(stderr || stdout || `docker exited with code ${exitCode}`));
+      };
+
+      child.stderr.on("data", (chunk) => stderrChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk))));
+      child.stdout.on("data", (chunk) => stdoutChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk))));
+      child.on("error", reject);
+      pipeline(createReadStream(sourcePath), child.stdin)
+        .then(() => {
+          stdinDone = true;
+          finish();
+        })
+        .catch(reject);
+      child.on("close", (code) => {
+        exitCode = code;
+        finish();
+      });
+    });
+  }
+
+  function localTimestampForFilename(): string {
+    const now = new Date();
+    const yyyy = String(now.getFullYear());
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
+    const dd = String(now.getDate()).padStart(2, "0");
+    const hh = String(now.getHours()).padStart(2, "0");
+    const mi = String(now.getMinutes()).padStart(2, "0");
+    const ss = String(now.getSeconds()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}-${hh}-${mi}-${ss}`;
+  }
+
+  function buildDefaultDumpName(config: ConnectionConfig, database: string, table?: string): string {
+    const stamp = localTimestampForFilename();
+    const safeName = `${config.name}-${database}${table ? `-${table}` : ""}`
+      .replace(/[\\/:*?"<>|]+/g, "-")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-");
+    return `${safeName}-${stamp}.sql`;
+  }
+
+  function isLoopbackHost(host: string): boolean {
+    const normalized = host.trim().toLowerCase();
+    return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
+  }
+
+  function resolveDockerMysqlHost(host: string): string {
+    if (process.platform === "linux") return host;
+    return isLoopbackHost(host) ? "host.docker.internal" : host;
+  }
+
+  function dockerNetworkArgs(): string[] {
+    return process.platform === "linux" ? ["--network", "host"] : [];
+  }
+
+  function dockerMysqlPasswordEnvArgs(): string[] {
+    // Pass through MYSQL_PWD from the docker CLI process into the container
+    // without exposing the actual password in command arguments or logs.
+    return ["-e", "MYSQL_PWD"];
+  }
+
+  function dockerTimezoneEnvArgs(): string[] {
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return timezone ? ["-e", `TZ=${timezone}`] : [];
+  }
+
+  async function withElapsedProgress<T>(
+    title: string,
+    run: (progress: vscode.Progress<{ message?: string; increment?: number }>) => Promise<T>
+  ): Promise<T> {
+    return await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title,
+        cancellable: false
+      },
+      async (progress) => {
+        const startedAt = Date.now();
+        const timer = setInterval(() => {
+          const elapsedSec = Math.max(1, Math.floor((Date.now() - startedAt) / 1000));
+          progress.report({ message: `In progress... ${elapsedSec}s elapsed` });
+        }, 1000);
+        try {
+          progress.report({ message: "Starting..." });
+          return await run(progress);
+        } finally {
+          clearInterval(timer);
+        }
+      }
+    );
+  }
+
+  async function exportMysqlDatabaseViaDocker(node?: ExplorerNode): Promise<void> {
+    const ctx = getMysqlExportContext(node);
+    if (!ctx) return;
+    if (!(await ensureDockerInstalled())) return;
+
+    const password = await ensureConnectionPassword(ctx.config);
+    if (password === undefined) return;
+
+    const targetLabel = ctx.table ? `${ctx.database}.${ctx.table}` : ctx.database;
+
+    const defaultDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
+    const target = await vscode.window.showSaveDialog({
+      title: `Export ${targetLabel} via Docker`,
+      defaultUri: vscode.Uri.file(path.join(defaultDir, buildDefaultDumpName(ctx.config, ctx.database, ctx.table))),
+      filters: { SQL: ["sql"], All: ["*"] },
+      saveLabel: "Export"
+    });
+    if (!target) return;
+
+    const ignoreTables = ctx.table
+      ? []
+      : (((await vscode.window.showInputBox({
+            title: `Ignore tables for ${ctx.database} (optional)`,
+            prompt: "Comma-separated fully qualified table names",
+            placeHolder: `${ctx.database}.v_SOURCE_queue_group`,
+            ignoreFocusOut: true
+          })) ?? "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean));
+
+    const dockerHost = resolveDockerMysqlHost(ctx.config.host);
+    const args = [
+      "run",
+      "--rm",
+      ...dockerMysqlPasswordEnvArgs(),
+      ...dockerTimezoneEnvArgs(),
+      ...dockerNetworkArgs(),
+      MYSQL_DOCKER_IMAGE,
+      "mariadb-dump",
+      "--skip-ssl",
+      "--protocol=TCP",
+      `-h${dockerHost}`,
+      `-P${ctx.config.port}`,
+      `-u${ctx.config.user}`,
+      "--single-transaction",
+      "--default-character-set=utf8mb4",
+      ...ignoreTables.map((table) => `--ignore-table=${table}`),
+      ctx.database,
+      ...(ctx.table ? [ctx.table] : [])
+    ];
+
+    deps.output.show(true);
+    deps.output.appendLine(`\n[${new Date().toISOString()}] Export via Docker: ${ctx.config.name}/${targetLabel}`);
+    deps.output.appendLine(
+      `[Docker] platform=${process.platform}, dbHost=${ctx.config.host}, dockerHost=${dockerHost}, tz=${
+        Intl.DateTimeFormat().resolvedOptions().timeZone || "system"
+      }`
+    );
+    deps.output.appendLine(`docker ${args.join(" ")}`);
+
+    try {
+      await withElapsedProgress(
+        `Exporting ${targetLabel} via Docker`,
+        async (progress) => {
+          progress.report({ message: "Starting export..." });
+          await spawnDockerToFile(args, password, target.fsPath);
+          progress.report({ message: "Finalizing dump file..." });
+        }
+      );
+      vscode.window.showInformationMessage(`Export completed: ${target.fsPath}`);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Export failed: ${(error as Error).message}`);
+    }
+  }
+
+  async function importMysqlDatabaseViaDocker(node?: ExplorerNode): Promise<void> {
+    const ctx = getMysqlExportContext(node);
+    if (!ctx) return;
+    if (!(await ensureDockerInstalled())) return;
+
+    const password = await ensureConnectionPassword(ctx.config);
+    if (password === undefined) return;
+
+    const targetLabel = ctx.table ? `${ctx.database}.${ctx.table}` : ctx.database;
+
+    const dockerHost = resolveDockerMysqlHost(ctx.config.host);
+    const source = await vscode.window.showOpenDialog({
+      title: `Import ${targetLabel} via Docker`,
+      canSelectFiles: true,
+      canSelectFolders: false,
+      canSelectMany: false,
+      filters: { SQL: ["sql"], All: ["*"] },
+      openLabel: "Import"
+    });
+    if (!source?.[0]) return;
+
+    const confirm = await vscode.window.showWarningMessage(
+      ctx.table
+        ? `Import ${source[0].fsPath} into ${ctx.config.name}/${targetLabel}? The SQL file should target only this table. Existing data may be overwritten.`
+        : `Import ${source[0].fsPath} into ${ctx.config.name}/${ctx.database}? Existing data may be overwritten.`,
+      { modal: true },
+      "Import"
+    );
+    if (confirm !== "Import") return;
+
+    const args = [
+      "run",
+      "--rm",
+      "-i",
+      ...dockerMysqlPasswordEnvArgs(),
+      ...dockerTimezoneEnvArgs(),
+      ...dockerNetworkArgs(),
+      MYSQL_DOCKER_IMAGE,
+      "mariadb",
+      "--skip-ssl",
+      "--protocol=TCP",
+      `--host=${dockerHost}`,
+      `--port=${ctx.config.port}`,
+      `--user=${ctx.config.user}`,
+      ctx.database
+    ];
+
+    deps.output.show(true);
+    deps.output.appendLine(`\n[${new Date().toISOString()}] Import via Docker: ${ctx.config.name}/${targetLabel}`);
+    deps.output.appendLine(
+      `[Docker] platform=${process.platform}, dbHost=${ctx.config.host}, dockerHost=${dockerHost}, tz=${
+        Intl.DateTimeFormat().resolvedOptions().timeZone || "system"
+      }`
+    );
+    deps.output.appendLine(`docker ${args.join(" ")} < ${source[0].fsPath}`);
+
+    try {
+      await withElapsedProgress(
+        `Importing ${targetLabel} via Docker`,
+        async () => {
+          await spawnDockerFromFile(args, password, source[0].fsPath);
+        }
+      );
+      vscode.window.showInformationMessage(`Import completed: ${targetLabel}`);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Import failed: ${(error as Error).message}`);
+    }
   }
 
   async function runSqlFileOnActiveConnection(): Promise<void> {
@@ -892,6 +1249,8 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX;`;
     showDatabaseInfo,
     showTableInfo,
     generateTableDdl,
+    exportMysqlDatabaseViaDocker,
+    importMysqlDatabaseViaDocker,
     previewTable,
     runPromptedQuery,
     runQueryFromEditor,
