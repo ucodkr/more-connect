@@ -1,7 +1,7 @@
 {
   "name": "more-connect",
   "displayName": "More Connect",
-  "description": "Database client for MySQL/MariaDB/PostgreSQL inside VS Code.",
+  "description": "More Connect is a VS Code extension for working with databases, servers, REST APIs, Docker hosts, web links, and local development tools from one sidebar",
   "version": "0.1.26",
   "publisher": "ucodkr",
   "engines": {
