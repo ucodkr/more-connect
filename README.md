@@ -35,6 +35,21 @@ Manage SSH targets directly from the sidebar.
 - Add, edit, remove, and reorder SSH hosts
 - Import hosts from `~/.ssh/config`
 - Open an SSH terminal from a saved target
+- Open **SSH File Explorer** to browse and download files over SSH (no `ssh2` driver required)
+
+SSH File Explorer:
+
+- Starts at the remote home folder (`~`)
+- Navigate with `..`, folder click, or typing a path (breadcrumbs support quick jumps)
+- Shows name, size, owner/group, and permissions
+- View small files inside VS Code
+- Download files via `scp`
+- Delete files/folders (with confirmation)
+
+Notes:
+
+- Uses your system `ssh`/`scp` in non-interactive mode (key/agent auth recommended)
+- If it’s the first time connecting to a host, run `ssh user@host` once in a terminal to accept the host key
 
 ## REST API Explorer
 

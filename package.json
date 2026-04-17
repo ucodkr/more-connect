@@ -43,6 +43,7 @@
     "onCommand:moreConnect.addRestCollection",
     "onCommand:moreConnect.addRestRequest",
     "onCommand:moreConnect.addDockerHost",
+    "onCommand:moreConnect.openSshFileExplorer",
     "onView:moreConnectConnections"
   ],
   "main": "./dist/extension.js",
@@ -130,6 +131,11 @@
         "command": "moreConnect.openSshTerminal",
         "title": "More Connect: Open SSH Terminal",
         "icon": "$(terminal)"
+      },
+      {
+        "command": "moreConnect.openSshFileExplorer",
+        "title": "More Connect: SSH File Explorer",
+        "icon": "$(file-directory)"
       },
       {
         "command": "moreConnect.importSshConfig",
@@ -763,6 +769,12 @@
           "when": "view == moreConnectConnections && viewItem == sshConnection",
           "group": "inline",
           "title": "Connect"
+        },
+        {
+          "command": "moreConnect.openSshFileExplorer",
+          "when": "view == moreConnectConnections && viewItem == sshConnection",
+          "group": "inline",
+          "title": "Explorer"
         },
         {
           "command": "moreConnect.editSshConnection",

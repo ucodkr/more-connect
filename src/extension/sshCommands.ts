@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import { parseSshConfig, readUserSshConfigText, sshConnectionsFromConfig } from "../ssh/sshConfig";
 import type { SshStore } from "../ssh/sshStore";
 import type { ExplorerNode } from "../ui/explorerView";
+import { SshFileExplorerPanel } from "../ui/sshFileExplorerPanel";
 
 type RefreshableView = {
   refresh(node?: ExplorerNode): void;
@@ -14,6 +15,7 @@ type SshCommandsDeps = {
 };
 
 export function registerSshCommands(context: vscode.ExtensionContext, deps: SshCommandsDeps): void {
+  const sshExplorer = new SshFileExplorerPanel(context);
   context.subscriptions.push(
     vscode.commands.registerCommand("moreConnect.openSshTerminal", async (node?: ExplorerNode) => {
       const conn = node?.kind === "ssh" ? node.conn : undefined;
@@ -24,6 +26,12 @@ export function registerSshCommands(context: vscode.ExtensionContext, deps: SshC
       });
       term.show(false);
       term.sendText(`ssh ${conn.target}`, true);
+    }),
+
+    vscode.commands.registerCommand("moreConnect.openSshFileExplorer", async (node?: ExplorerNode) => {
+      const conn = node?.kind === "ssh" ? node.conn : undefined;
+      if (!conn) return;
+      await sshExplorer.open(conn);
     }),
 
     vscode.commands.registerCommand("moreConnect.importSshConfig", async () => {
