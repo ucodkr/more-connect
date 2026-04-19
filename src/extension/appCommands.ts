@@ -3,6 +3,7 @@ import type { ConnectionStore } from "../storage";
 import type { DockerStore } from "../docker/dockerStore";
 import type { OllamaStore } from "../ollama/ollamaStore";
 import type { RestViewProvider } from "../rest/viewProvider";
+import type { S3Store } from "../s3/s3Store";
 import type { SshStore } from "../ssh/sshStore";
 import type { VsCodeFavoriteStore } from "../vscode/vscodeFavoriteStore";
 import type { WebLinkStore } from "../web/webLinkStore";
@@ -17,6 +18,7 @@ type AppCommandsDeps = {
   sshStore: SshStore;
   webLinkStore: WebLinkStore;
   dockerStore: DockerStore;
+  s3Store: S3Store;
   vsCodeFavoriteStore: VsCodeFavoriteStore;
   ollamaStore: OllamaStore;
   restProvider: RestViewProvider;
@@ -53,6 +55,7 @@ export function registerAppCommands(context: vscode.ExtensionContext, deps: AppC
         `sshFile(if set): ${vscode.Uri.joinPath(deps.sshStore.getFolderUri(), "more-connect-ssh.json").fsPath}`,
         `webLinksFile(if set): ${vscode.Uri.joinPath(deps.webLinkStore.getFolderUri(), "more-connect-web-links.json").fsPath}`,
         `dockerFile(if set): ${vscode.Uri.joinPath(deps.dockerStore.getFolderUri(), "more-connect-docker.json").fsPath}`,
+        `s3File(if set): ${vscode.Uri.joinPath(deps.s3Store.getFolderUri(), "more-connect-s3.json").fsPath}`,
         `restFile(if set): ${vscode.Uri.joinPath(deps.store.getFolderUri() ?? context.globalStorageUri, "more.rest.json").fsPath}`,
         `vscodeFavoritesFile(if set): ${vscode.Uri.joinPath(deps.vsCodeFavoriteStore.getFolderUri(), "more-connect-vscode-favorites.json").fsPath}`,
         `ollamaFile(if set): ${vscode.Uri.joinPath(deps.ollamaStore.getFolderUri(), "more-connect-ollama.json").fsPath}`
@@ -80,6 +83,7 @@ export function registerAppCommands(context: vscode.ExtensionContext, deps: AppC
       await deps.sshStore.setFolderUri(pick[0]);
       await deps.webLinkStore.setFolderUri(pick[0]);
       await deps.dockerStore.setFolderUri(pick[0]);
+      await deps.s3Store.setFolderUri(pick[0]);
       await deps.vsCodeFavoriteStore.setFolderUri(pick[0]);
       await deps.ollamaStore.setFolderUri(pick[0]);
       await deps.restProvider.setGlobalStorageFolder(pick[0]);

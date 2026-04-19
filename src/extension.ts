@@ -25,6 +25,7 @@ import { createOllamaController } from "./extension/ollamaController";
 import { registerDockerCommands } from "./extension/dockerCommands";
 import { registerOllamaCommands } from "./extension/ollamaCommands";
 import { registerRestCommands } from "./extension/restCommands";
+import { registerS3Commands } from "./extension/s3Commands";
 import { registerSshCommands } from "./extension/sshCommands";
 import { registerVsCodeFavoriteCommands } from "./extension/vscodeFavoriteCommands";
 import { registerWebCommands } from "./extension/webCommands";
@@ -44,6 +45,8 @@ import { escapeHtml, renderTable } from "./extension/sqlUtils";
 import { createDbRuntime } from "./extension/dbRuntime";
 import { registerConnectionCommands } from "./extension/connectionCommands";
 import { createSqlController } from "./extension/sqlCommands";
+import { listBuckets, listFolder } from "./s3/s3Client";
+import { S3Store } from "./s3/s3Store";
 
 const ACTIVE_CONNECTION_KEY = "moreConnect.activeConnectionId";
 const SAVED_SQL_KEY = "moreConnect.savedSql.v1";
@@ -64,6 +67,8 @@ export async function activate(context: vscode.ExtensionContext) {
   await ollamaStore.init();
   const dockerStore = new DockerStore(context);
   await dockerStore.init();
+  const s3Store = new S3Store(context, context.secrets);
+  await s3Store.init();
   const restProvider = new RestViewProvider(context);
   const output = vscode.window.createOutputChannel("More Connect");
   let ollamaController: ReturnType<typeof createOllamaController>;
@@ -152,6 +157,31 @@ export async function activate(context: vscode.ExtensionContext) {
     listSshConnections: () => sshStore.list(),
     listWebLinks: () => webLinkStore.list(),
     listDockerHosts: () => dockerStore.list(),
+    listS3Hosts: () => s3Store.list(),
+    listS3Buckets: async (host) => {
+      const secret = await s3Store.getSecret(host.id);
+      if (!secret?.secretAccessKey) return [];
+      return await listBuckets(host, {
+        accessKeyId: host.accessKeyId,
+        secretAccessKey: secret.secretAccessKey,
+        sessionToken: secret.sessionToken
+      });
+    },
+    listS3Folder: async (host, bucket, prefix) => {
+      const secret = await s3Store.getSecret(host.id);
+      if (!secret?.secretAccessKey) return { prefixes: [], objects: [] };
+      const listed = await listFolder(
+        host,
+        {
+          accessKeyId: host.accessKeyId,
+          secretAccessKey: secret.secretAccessKey,
+          sessionToken: secret.sessionToken
+        },
+        bucket,
+        prefix
+      );
+      return { prefixes: listed.prefixes, objects: listed.objects.map((o) => ({ key: o.key, size: o.size })) };
+    },
     listDockerContainers: async (host) => await listDockerContainers(host),
     listDockerImages: async (host) => await listDockerImages(host),
     listDockerVolumes: async (host) => await listDockerVolumes(host),
@@ -214,6 +244,7 @@ export async function activate(context: vscode.ExtensionContext) {
     sshStore,
     webLinkStore,
     dockerStore,
+    s3Store,
     vsCodeFavoriteStore,
     ollamaStore,
     restProvider,
@@ -237,6 +268,10 @@ export async function activate(context: vscode.ExtensionContext) {
     view,
     promptDockerHost,
     quoteShellArg
+  });
+  registerS3Commands(context, {
+    s3Store,
+    view
   });
   registerSshCommands(context, { sshStore, view });
   registerWebCommands(context, {

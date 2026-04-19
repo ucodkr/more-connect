@@ -1,9 +1,9 @@
 import * as vscode from "vscode";
 import type { DockerCategory, DockerContainerInfo, DockerImageInfo, DockerNetworkInfo, DockerVolumeInfo } from "../docker/dockerClient";
-import type { ConnectionConfig, DockerHost, OllamaEndpoint, SshConnection, VsCodeFavorite, WebLink } from "../types";
+import type { ConnectionConfig, DockerHost, OllamaEndpoint, S3Host, SshConnection, VsCodeFavorite, WebLink } from "../types";
 import type { Collection as RestCollection, FolderItem as RestFolderItem, RequestItem as RestRequestItem } from "../rest/models";
 
-export type ExplorerGroupName = "db" | "ssh" | "web" | "rest" | "docker" | "ollama" | "vscode";
+export type ExplorerGroupName = "db" | "ssh" | "web" | "rest" | "s3" | "docker" | "ollama" | "vscode";
 
 export type ExplorerNode =
   | {
@@ -114,6 +114,30 @@ export type ExplorerNode =
   | {
       kind: "vscodeFavorite";
       favorite: VsCodeFavorite;
+    }
+  | {
+      kind: "s3Host";
+      host: S3Host;
+    }
+  | {
+      kind: "s3Bucket";
+      hostId: string;
+      bucket: string;
+    }
+  | {
+      kind: "s3Prefix";
+      hostId: string;
+      bucket: string;
+      prefix: string;
+      name: string;
+    }
+  | {
+      kind: "s3Object";
+      hostId: string;
+      bucket: string;
+      key: string;
+      name: string;
+      size?: number;
     };
 
 export type ExplorerDataSource = {
@@ -130,6 +154,13 @@ export type ExplorerDataSource = {
   listVsCodeFavorites(): VsCodeFavorite[];
   listOllamaEndpoints(): OllamaEndpoint[];
   listOllamaModels(endpoint: OllamaEndpoint): Promise<string[]>;
+  listS3Hosts(): S3Host[];
+  listS3Buckets(host: S3Host): Promise<string[]>;
+  listS3Folder(
+    host: S3Host,
+    bucket: string,
+    prefix: string
+  ): Promise<{ prefixes: string[]; objects: Array<{ key: string; size?: number }> }>;
   isConnected(id: string): boolean;
   getActiveConnectionId(): string | undefined;
   listDatabases(connection: ConnectionConfig): Promise<string[]>;
@@ -168,6 +199,8 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
                 ? "Web Links"
               : element.group === "rest"
                 ? "REST APIs"
+              : element.group === "s3"
+                ? "S3 Browser"
               : element.group === "docker"
                 ? "Docker"
               : element.group === "vscode"
@@ -188,6 +221,8 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
                 ? "webGroup"
               : element.group === "rest"
                 ? "restGroup"
+              : element.group === "s3"
+                ? "s3Group"
               : element.group === "docker"
                 ? "dockerGroup"
               : element.group === "vscode"
@@ -202,6 +237,8 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
                 ? "globe"
               : element.group === "rest"
                 ? "radio-tower"
+              : element.group === "s3"
+                ? "cloud"
               : element.group === "docker"
                 ? "package"
               : element.group === "vscode"
@@ -412,6 +449,33 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
         item.iconPath = new vscode.ThemeIcon(element.favorite.kind === "workspace" ? "file-submodule" : "folder");
         return item;
       }
+      case "s3Host": {
+        const item = new vscode.TreeItem(element.host.name, vscode.TreeItemCollapsibleState.Collapsed);
+        item.contextValue = "s3Host";
+        item.description = element.host.provider === "aws" ? "AWS" : element.host.provider === "minio" ? "MinIO" : "S3";
+        item.tooltip = element.host.endpointUrl ?? element.host.region;
+        item.iconPath = new vscode.ThemeIcon("cloud");
+        return item;
+      }
+      case "s3Bucket": {
+        const item = new vscode.TreeItem(element.bucket, vscode.TreeItemCollapsibleState.Collapsed);
+        item.contextValue = "s3Bucket";
+        item.iconPath = new vscode.ThemeIcon("archive");
+        return item;
+      }
+      case "s3Prefix": {
+        const item = new vscode.TreeItem(element.name, vscode.TreeItemCollapsibleState.Collapsed);
+        item.contextValue = "s3Prefix";
+        item.iconPath = new vscode.ThemeIcon("folder");
+        return item;
+      }
+      case "s3Object": {
+        const item = new vscode.TreeItem(element.name, vscode.TreeItemCollapsibleState.None);
+        item.contextValue = "s3Object";
+        item.description = typeof element.size === "number" ? `${element.size} B` : "";
+        item.iconPath = new vscode.ThemeIcon("file");
+        return item;
+      }
     }
   }
 
@@ -422,6 +486,7 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
         { kind: "group", group: "ssh" },
         { kind: "group", group: "web" },
         { kind: "group", group: "rest" },
+        { kind: "group", group: "s3" },
         { kind: "group", group: "docker" },
         { kind: "group", group: "vscode" },
         { kind: "group", group: "ollama" },
@@ -455,6 +520,10 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
       );
     }
 
+    if (element.kind === "group" && element.group === "s3") {
+      return this.withEmptyState(this.source.listS3Hosts().map((host) => ({ kind: "s3Host", host })), "No S3 hosts");
+    }
+
     if (element.kind === "group" && element.group === "docker") {
       return this.withEmptyState(
         this.source.listDockerHosts().map((host) => ({ kind: "dockerHost", host })),
@@ -473,6 +542,66 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
       return this.withEmptyState(
         this.source.listOllamaEndpoints().map((endpoint) => ({ kind: "ollama", endpoint })),
         "No Ollama endpoints"
+      );
+    }
+
+    if (element.kind === "s3Host") {
+      const buckets = await this.source.listS3Buckets(element.host);
+      return this.withEmptyState(
+        buckets.map((bucket) => ({ kind: "s3Bucket", hostId: element.host.id, bucket })),
+        "No buckets"
+      );
+    }
+
+    if (element.kind === "s3Bucket") {
+      const host = this.source.listS3Hosts().find((h) => h.id === element.hostId);
+      if (!host) return [];
+      const { prefixes, objects } = await this.source.listS3Folder(host, element.bucket, "");
+      return this.withEmptyState(
+        [
+          ...prefixes.map((p) => ({
+            kind: "s3Prefix" as const,
+            hostId: element.hostId,
+            bucket: element.bucket,
+            prefix: p,
+            name: p.split("/").filter(Boolean).slice(-1)[0] ?? p
+          })),
+          ...objects.map((o) => ({
+            kind: "s3Object" as const,
+            hostId: element.hostId,
+            bucket: element.bucket,
+            key: o.key,
+            name: o.key.split("/").filter(Boolean).slice(-1)[0] ?? o.key,
+            size: o.size
+          }))
+        ],
+        "Empty"
+      );
+    }
+
+    if (element.kind === "s3Prefix") {
+      const host = this.source.listS3Hosts().find((h) => h.id === element.hostId);
+      if (!host) return [];
+      const { prefixes, objects } = await this.source.listS3Folder(host, element.bucket, element.prefix);
+      return this.withEmptyState(
+        [
+          ...prefixes.map((p) => ({
+            kind: "s3Prefix" as const,
+            hostId: element.hostId,
+            bucket: element.bucket,
+            prefix: p,
+            name: p.split("/").filter(Boolean).slice(-1)[0] ?? p
+          })),
+          ...objects.map((o) => ({
+            kind: "s3Object" as const,
+            hostId: element.hostId,
+            bucket: element.bucket,
+            key: o.key,
+            name: o.key.split("/").filter(Boolean).slice(-1)[0] ?? o.key,
+            size: o.size
+          }))
+        ],
+        "Empty"
       );
     }
 

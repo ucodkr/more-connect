@@ -62,6 +62,21 @@ export type VsCodeFavorite = {
   kind: "folder" | "workspace";
 };
 
+export type S3Provider = "aws" | "minio" | "s3compatible";
+
+export type S3Host = {
+  id: string;
+  name: string;
+  provider: S3Provider;
+  /** e.g. https://s3.amazonaws.com or http://localhost:9000 (MinIO) */
+  endpointUrl?: string;
+  /** e.g. us-east-1 */
+  region: string;
+  accessKeyId: string;
+  /** Needed for most S3-compatible services (MinIO, etc.) */
+  forcePathStyle?: boolean;
+};
+
 export type QueryResult = {
   columns: string[];
   rows: Array<Record<string, unknown>>;

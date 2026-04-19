@@ -57,6 +57,7 @@ export function createExtensionState(deps: ExtensionStateDeps) {
       ssh: saved.ssh ?? true,
       web: saved.web ?? true,
       rest: saved.rest ?? true,
+      s3: saved.s3 ?? true,
       docker: saved.docker ?? true,
       vscode: saved.vscode ?? true,
       ollama: saved.ollama ?? true

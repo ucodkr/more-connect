@@ -19,7 +19,9 @@
 
 .codicon-eye:before { content: "\ea70"; }
 .codicon-file:before { content: "\ea7b"; }
+.codicon-new-folder:before { content: "\ea80"; }
 .codicon-trash:before { content: "\ea81"; }
 .codicon-folder:before { content: "\ea83"; }
 .codicon-cloud-download:before { content: "\eac2"; }
 .codicon-folder-opened:before { content: "\eaf7"; }
+.codicon-save:before { content: "\eb4b"; }

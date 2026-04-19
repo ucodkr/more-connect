@@ -43,6 +43,12 @@
     "onCommand:moreConnect.addRestCollection",
     "onCommand:moreConnect.addRestRequest",
     "onCommand:moreConnect.addDockerHost",
+    "onCommand:moreConnect.addS3Host",
+    "onCommand:moreConnect.uploadS3",
+    "onCommand:moreConnect.uploadS3File",
+    "onCommand:moreConnect.uploadS3Folder",
+    "onCommand:moreConnect.createS3Folder",
+    "onCommand:moreConnect.copyS3Link",
     "onCommand:moreConnect.openSshFileExplorer",
     "onView:moreConnectConnections"
   ],
@@ -206,6 +212,71 @@
         "command": "moreConnect.removeDockerImage",
         "title": "More Connect: Remove Docker Image",
         "icon": "$(trash)"
+      },
+      {
+        "command": "moreConnect.addS3Host",
+        "title": "More Connect: Add S3 Host",
+        "icon": "$(add)"
+      },
+      {
+        "command": "moreConnect.editS3Host",
+        "title": "More Connect: Edit S3 Host",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "moreConnect.removeS3Host",
+        "title": "More Connect: Remove S3 Host",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "moreConnect.refreshS3",
+        "title": "More Connect: Refresh S3",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "moreConnect.uploadS3",
+        "title": "More Connect: Upload to S3",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "moreConnect.uploadS3File",
+        "title": "More Connect: Upload File to S3",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "moreConnect.uploadS3Folder",
+        "title": "More Connect: Upload Folder to S3",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "moreConnect.createS3Folder",
+        "title": "More Connect: Create S3 Folder",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "moreConnect.deleteS3Object",
+        "title": "More Connect: Delete S3 File",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "moreConnect.deleteS3Folder",
+        "title": "More Connect: Delete S3 Folder",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "moreConnect.downloadS3Object",
+        "title": "More Connect: Download S3 File",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "moreConnect.downloadS3Folder",
+        "title": "More Connect: Download S3 Folder",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "moreConnect.copyS3Link",
+        "title": "More Connect: Copy S3 Link",
+        "icon": "$(link)"
       },
       {
         "command": "moreConnect.openRestClient",
@@ -560,6 +631,11 @@
           "group": "inline"
         },
         {
+          "command": "moreConnect.addS3Host",
+          "when": "view == moreConnectConnections && viewItem == s3Group",
+          "group": "inline"
+        },
+        {
           "command": "moreConnect.addVsCodeFavorite",
           "when": "view == moreConnectConnections && viewItem == vscodeGroup",
           "group": "inline"
@@ -677,6 +753,76 @@
         {
           "command": "moreConnect.removeDockerHost",
           "when": "view == moreConnectConnections && viewItem == dockerHost",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.refreshS3",
+          "when": "view == moreConnectConnections && viewItem == s3Host",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.editS3Host",
+          "when": "view == moreConnectConnections && viewItem == s3Host",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.removeS3Host",
+          "when": "view == moreConnectConnections && viewItem == s3Host",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.uploadS3",
+          "when": "view == moreConnectConnections && viewItem == s3Bucket",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.copyS3Link",
+          "when": "view == moreConnectConnections && viewItem == s3Bucket",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.createS3Folder",
+          "when": "view == moreConnectConnections && viewItem == s3Bucket",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.uploadS3",
+          "when": "view == moreConnectConnections && viewItem == s3Prefix",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.createS3Folder",
+          "when": "view == moreConnectConnections && viewItem == s3Prefix",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.deleteS3Folder",
+          "when": "view == moreConnectConnections && viewItem == s3Prefix",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.downloadS3Folder",
+          "when": "view == moreConnectConnections && viewItem == s3Prefix",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.copyS3Link",
+          "when": "view == moreConnectConnections && viewItem == s3Prefix",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.deleteS3Object",
+          "when": "view == moreConnectConnections && viewItem == s3Object",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.downloadS3Object",
+          "when": "view == moreConnectConnections && viewItem == s3Object",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.copyS3Link",
+          "when": "view == moreConnectConnections && viewItem == s3Object",
           "group": "navigation"
         },
         {
@@ -1045,6 +1191,7 @@
     "typescript": "^5.3.3"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1032.0",
     "mysql2": "^3.11.0",
     "pg": "^8.12.0",
     "ssh2": "^1.16.0"

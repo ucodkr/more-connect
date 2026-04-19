@@ -28,6 +28,18 @@ With the database explorer you can:
 
 Passwords are stored in VS Code Secret Storage.
 
+## S3 Browser (AWS S3 / MinIO)
+
+Manage S3-compatible hosts and browse buckets and objects from the sidebar.
+
+- Add/edit/remove S3 hosts (AWS S3, MinIO, S3 compatible)
+- List buckets, folders, and files (tree view)
+- Upload file / upload local folder (recursive)
+- Create folder (creates a trailing-slash object)
+- Delete file or delete folder (recursive)
+
+S3 secrets are stored in VS Code Secret Storage.
+
 ## SSH Connections
 
 Manage SSH targets directly from the sidebar.
@@ -126,6 +138,7 @@ This includes:
 - Web links
 - REST API data
 - Docker hosts
+- S3 hosts
 - VS Code favorites
 - Ollama/vLLM endpoints
 
@@ -137,6 +150,7 @@ The More Connect sidebar includes:
 - SSH Connections
 - Web Links
 - REST APIs
+- S3 Browser
 - Docker
 - Folder/Workspace Favorites
 - LLM (Ollama/vLLM)
