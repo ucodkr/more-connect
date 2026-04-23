@@ -7,138 +7,138 @@ export type ExplorerGroupName = "db" | "ssh" | "web" | "rest" | "s3" | "docker" 
 
 export type ExplorerNode =
   | {
-      kind: "group";
-      group: ExplorerGroupName;
-    }
+    kind: "group";
+    group: ExplorerGroupName;
+  }
   | {
-      kind: "empty";
-      label: string;
-    }
+    kind: "empty";
+    label: string;
+  }
   | {
-      kind: "versionInfo";
-      label: string;
-      tooltip?: string;
-    }
+    kind: "versionInfo";
+    label: string;
+    tooltip?: string;
+  }
   | {
-      kind: "connection";
-      config: ConnectionConfig;
-      connected: boolean;
-      active: boolean;
-    }
+    kind: "connection";
+    config: ConnectionConfig;
+    connected: boolean;
+    active: boolean;
+  }
   | {
-      kind: "database";
-      connectionId: string;
-      database: string;
-    }
+    kind: "database";
+    connectionId: string;
+    database: string;
+  }
   | {
-      kind: "sqlFolder";
-      connectionId: string;
-      database: string;
-    }
+    kind: "sqlFolder";
+    connectionId: string;
+    database: string;
+  }
   | {
-      kind: "sqlItem";
-      connectionId: string;
-      database: string;
-      id: string;
-      name: string;
-      sql: string;
-    }
+    kind: "sqlItem";
+    connectionId: string;
+    database: string;
+    id: string;
+    name: string;
+    sql: string;
+  }
   | {
-      kind: "table";
-      connectionId: string;
-      database: string;
-      table: string;
-      schema?: string;
-      tableType?: string;
-    }
+    kind: "table";
+    connectionId: string;
+    database: string;
+    table: string;
+    schema?: string;
+    tableType?: string;
+  }
   | {
-      kind: "ssh";
-      conn: SshConnection;
-    }
+    kind: "ssh";
+    conn: SshConnection;
+  }
   | {
-      kind: "webLink";
-      link: WebLink;
-    }
+    kind: "webLink";
+    link: WebLink;
+  }
   | {
-      kind: "dockerHost";
-      host: DockerHost;
-    }
+    kind: "dockerHost";
+    host: DockerHost;
+  }
   | {
-      kind: "dockerCategory";
-      hostId: string;
-      category: DockerCategory;
-    }
+    kind: "dockerCategory";
+    hostId: string;
+    category: DockerCategory;
+  }
   | {
-      kind: "dockerContainer";
-      hostId: string;
-      container: DockerContainerInfo;
-    }
+    kind: "dockerContainer";
+    hostId: string;
+    container: DockerContainerInfo;
+  }
   | {
-      kind: "dockerImage";
-      hostId: string;
-      image: DockerImageInfo;
-    }
+    kind: "dockerImage";
+    hostId: string;
+    image: DockerImageInfo;
+  }
   | {
-      kind: "dockerVolume";
-      hostId: string;
-      volume: DockerVolumeInfo;
-    }
+    kind: "dockerVolume";
+    hostId: string;
+    volume: DockerVolumeInfo;
+  }
   | {
-      kind: "dockerNetwork";
-      hostId: string;
-      network: DockerNetworkInfo;
-    }
+    kind: "dockerNetwork";
+    hostId: string;
+    network: DockerNetworkInfo;
+  }
   | {
-      kind: "restCollection";
-      collection: RestCollection;
-    }
+    kind: "restCollection";
+    collection: RestCollection;
+  }
   | {
-      kind: "restFolder";
-      collectionId: string;
-      folder: RestFolderItem;
-    }
+    kind: "restFolder";
+    collectionId: string;
+    folder: RestFolderItem;
+  }
   | {
-      kind: "restRequest";
-      collectionId: string;
-      request: RestRequestItem;
-    }
+    kind: "restRequest";
+    collectionId: string;
+    request: RestRequestItem;
+  }
   | {
-      kind: "ollama";
-      endpoint: OllamaEndpoint;
-    }
+    kind: "ollama";
+    endpoint: OllamaEndpoint;
+  }
   | {
-      kind: "ollamaModel";
-      endpointId: string;
-      model: string;
-    }
+    kind: "ollamaModel";
+    endpointId: string;
+    model: string;
+  }
   | {
-      kind: "vscodeFavorite";
-      favorite: VsCodeFavorite;
-    }
+    kind: "vscodeFavorite";
+    favorite: VsCodeFavorite;
+  }
   | {
-      kind: "s3Host";
-      host: S3Host;
-    }
+    kind: "s3Host";
+    host: S3Host;
+  }
   | {
-      kind: "s3Bucket";
-      hostId: string;
-      bucket: string;
-    }
+    kind: "s3Bucket";
+    hostId: string;
+    bucket: string;
+  }
   | {
-      kind: "s3Prefix";
-      hostId: string;
-      bucket: string;
-      prefix: string;
-      name: string;
-    }
+    kind: "s3Prefix";
+    hostId: string;
+    bucket: string;
+    prefix: string;
+    name: string;
+  }
   | {
-      kind: "s3Object";
-      hostId: string;
-      bucket: string;
-      key: string;
-      name: string;
-      size?: number;
-    };
+    kind: "s3Object";
+    hostId: string;
+    bucket: string;
+    key: string;
+    name: string;
+    size?: number;
+  };
 
 export type ExplorerDataSource = {
   listConnections(): ConnectionConfig[];
@@ -177,7 +177,7 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<ExplorerNode | void>();
   public readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
-  public constructor(private readonly source: ExplorerDataSource) {}
+  public constructor(private readonly source: ExplorerDataSource) { }
 
   public refresh(node?: ExplorerNode): void {
     this._onDidChangeTreeData.fire(node);
@@ -197,15 +197,15 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
               ? "SSH Connections"
               : element.group === "web"
                 ? "Web Links"
-              : element.group === "rest"
-                ? "REST APIs"
-              : element.group === "s3"
-                ? "S3 Browser"
-              : element.group === "docker"
-                ? "Docker"
-              : element.group === "vscode"
-                  ? "Folder/ Worksapce Favorites"
-                : "LLM (Ollama/vLLM)";
+                : element.group === "rest"
+                  ? "REST APIs"
+                  : element.group === "s3"
+                    ? "S3 Browser"
+                    : element.group === "docker"
+                      ? "Docker"
+                      : element.group === "vscode"
+                        ? "Folder/ Worksapce Favorites"
+                        : "LLM (Ollama/vLLM)";
         const item = new vscode.TreeItem(
           label,
           this.source.isGroupExpanded(element.group)
@@ -219,15 +219,15 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
               ? "sshGroup"
               : element.group === "web"
                 ? "webGroup"
-              : element.group === "rest"
-                ? "restGroup"
-              : element.group === "s3"
-                ? "s3Group"
-              : element.group === "docker"
-                ? "dockerGroup"
-              : element.group === "vscode"
-                  ? "vscodeGroup"
-                : "ollamaGroup";
+                : element.group === "rest"
+                  ? "restGroup"
+                  : element.group === "s3"
+                    ? "s3Group"
+                    : element.group === "docker"
+                      ? "dockerGroup"
+                      : element.group === "vscode"
+                        ? "vscodeGroup"
+                        : "ollamaGroup";
         item.iconPath = new vscode.ThemeIcon(
           element.group === "db"
             ? "database"
@@ -235,15 +235,15 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
               ? "terminal"
               : element.group === "web"
                 ? "globe"
-              : element.group === "rest"
-                ? "radio-tower"
-              : element.group === "s3"
-                ? "cloud"
-              : element.group === "docker"
-                ? "package"
-              : element.group === "vscode"
-                  ? "code"
-                : "hubot"
+                : element.group === "rest"
+                  ? "radio-tower"
+                  : element.group === "s3"
+                    ? "cloud"
+                    : element.group === "docker"
+                      ? "package"
+                      : element.group === "vscode"
+                        ? "code"
+                        : "hubot"
         );
         return item;
       }
@@ -252,9 +252,8 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
         const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Collapsed);
         item.contextValue = element.connected ? "connectionConnected" : "connection";
         item.description = `${element.config.type} ${element.connected ? "●" : "○"}`;
-        item.tooltip = `${element.config.type}@${element.config.host}:${element.config.port}${
-          element.config.database ? `/${element.config.database}` : ""
-        }`;
+        item.tooltip = `${element.config.type}@${element.config.host}:${element.config.port}${element.config.database ? `/${element.config.database}` : ""
+          }`;
         item.iconPath = element.connected
           ? new vscode.ThemeIcon("plug", new vscode.ThemeColor("charts.green"))
           : new vscode.ThemeIcon("circle-outline");
@@ -370,6 +369,23 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
         item.description = element.container.state || element.container.image;
         item.tooltip = `${element.container.image}\n${element.container.status}`;
         item.iconPath = new vscode.ThemeIcon("vm");
+        // 선택 시 로그 테일링(실시간 반영)
+        // 선택 시 아무 동작 없음, 로그 아이콘 버튼만 표시
+        item.buttons = [
+          {
+            iconPath: new vscode.ThemeIcon("output"),
+            tooltip: "Show Logs Panel",
+            command: {
+              command: "moreConnect.showDockerContainerLogs",
+              title: "Show Logs",
+              arguments: [{
+                kind: "dockerContainer",
+                hostId: element.hostId,
+                container: element.container
+              }]
+            }
+          }
+        ];
         return item;
       }
       case "dockerImage": {

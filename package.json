@@ -547,6 +547,11 @@
         "command": "moreConnect.showInfo",
         "title": "More Connect: Show Info",
         "icon": "$(info)"
+      },
+      {
+        "command": "moreConnect.showDockerContainerLogs",
+        "title": "More Connect: Show Docker Container Logs",
+        "icon": "$(output)"
       }
     ],
     "viewsContainers": {
@@ -836,7 +841,17 @@
           "group": "inline"
         },
         {
+          "command": "moreConnect.showDockerContainerLogs",
+          "when": "view == moreConnectConnections && viewItem == dockerContainerRunning",
+          "group": "inline"
+        },
+        {
           "command": "moreConnect.startDockerContainer",
+          "when": "view == moreConnectConnections && viewItem == dockerContainerStopped",
+          "group": "inline"
+        },
+        {
+          "command": "moreConnect.showDockerContainerLogs",
           "when": "view == moreConnectConnections && viewItem == dockerContainerStopped",
           "group": "inline"
         },
@@ -1192,9 +1207,11 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1032.0",
+    "ansi-to-html": "^0.7.2",
     "mysql2": "^3.11.0",
     "pg": "^8.12.0",
-    "ssh2": "^1.16.0"
+    "ssh2": "^1.16.0",
+    "strip-ansi": "^7.2.0"
   },
   "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }

@@ -1,3 +1,14 @@
+import * as vscode from "vscode";
+// npm/yarn 명령을 터미널에서 실행 (컬러, 상태, 경고 등 유지)
+export function runNpmOrYarnInTerminal(command: string, cwd?: string) {
+  const terminal = vscode.window.createTerminal({
+    name: `npm/yarn: ${command}`,
+    cwd: cwd || undefined
+  });
+  terminal.show(true);
+  terminal.sendText(command, true);
+  vscode.window.showInformationMessage(`명령이 터미널에서 실행됩니다: ${command}`);
+}
 import { createRequire } from "node:module";
 import * as vscode from "vscode";
 import type { OptionalModuleLoader } from "../db/factory";
