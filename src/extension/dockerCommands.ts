@@ -1,7 +1,7 @@
-import { getDockerContainerLogs } from "../docker/dockerClient";
 import * as vscode from "vscode";
 import { removeDockerContainer, removeDockerImage, startDockerContainer, stopDockerContainer, getDockerContainerLogs } from "../docker/dockerClient";
 import { DockerLogsPanel } from "../ui/dockerLogsPanel";
+import { ansiLinesToHtml, normalizeAnsiDisplayLine, stripAnsi } from "../ui/ansiToHtml";
 import type { DockerStore } from "../docker/dockerStore";
 import type { DockerHost } from "../types";
 import type { ExplorerNode } from "../ui/explorerView";
@@ -20,6 +20,7 @@ type DockerCommandsDeps = {
 export function registerDockerCommands(context: vscode.ExtensionContext, deps: DockerCommandsDeps): void {
   // 실시간 로그 테일링 관리
   let tailingInterval: NodeJS.Timeout | undefined;
+  let panelTailingInterval: NodeJS.Timeout | undefined;
   let lastLogs = "";
   // 컨테이너 선택 시 로그 테일링(실시간 반영)
   context.subscriptions.push(
@@ -64,13 +65,52 @@ export function registerDockerCommands(context: vscode.ExtensionContext, deps: D
     if (node?.kind !== "dockerContainer") return;
     const host = deps.dockerStore.list().find((item) => item.id === node.hostId);
     if (!host) return;
-    let logs = "";
-    try {
-      logs = await getDockerContainerLogs(host, node.container.id, 2000);
-    } catch (err: any) {
-      logs = err?.message || String(err);
+    const containerId = node.container.id;
+
+    const fetchLogs = async () => {
+      try {
+        return await getDockerContainerLogs(host, containerId, 2000);
+      } catch (err: any) {
+        return err?.message || String(err);
+      }
+    };
+
+    const toPayload = (logs: string) => {
+      const rawLines = logs.length > 0 ? logs.split(/\r?\n/g) : [];
+      return {
+        containerId,
+        rawLines: rawLines.map((line) => stripAnsi(normalizeAnsiDisplayLine(line))),
+        htmlLines: ansiLinesToHtml(rawLines)
+      };
+    };
+
+    const initialLogs = await fetchLogs();
+    logsPanel.show(host, containerId, initialLogs);
+
+    if (panelTailingInterval) {
+      clearInterval(panelTailingInterval);
+      panelTailingInterval = undefined;
     }
-    logsPanel.show(host, node.container.id, logs);
+
+    const disposeSub = logsPanel.onDidDispose(() => {
+      if (panelTailingInterval) {
+        clearInterval(panelTailingInterval);
+        panelTailingInterval = undefined;
+      }
+      disposeSub.dispose();
+    });
+
+    panelTailingInterval = setInterval(async () => {
+      if (!logsPanel.isVisible()) {
+        if (panelTailingInterval) {
+          clearInterval(panelTailingInterval);
+          panelTailingInterval = undefined;
+        }
+        return;
+      }
+      const nextLogs = await fetchLogs();
+      logsPanel.postMessage({ type: "dockerLogs.setLogs", payload: toPayload(nextLogs) });
+    }, 2000);
   }),
     context.subscriptions.push(
       vscode.commands.registerCommand("moreConnect.addDockerHost", async () => {

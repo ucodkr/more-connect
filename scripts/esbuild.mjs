@@ -31,9 +31,10 @@ function getGitTag() {
 }
 
 mkdirSync("dist", { recursive: true });
+mkdirSync("media", { recursive: true });
 
 /** @type {import("esbuild").BuildOptions} */
-const buildOptions = {
+const extensionBuildOptions = {
   bundle: true,
   sourcemap: true,
   minify: false,
@@ -50,12 +51,41 @@ const buildOptions = {
   }
 };
 
+/** @type {import("esbuild").BuildOptions} */
+const webviewBuildOptions = {
+  bundle: true,
+  sourcemap: true,
+  minify: false,
+  logLevel: "info",
+  platform: "browser",
+  target: ["es2020"],
+  format: "iife",
+  entryPoints: [
+    "src/webview/connectionWizardApp.tsx",
+    "src/webview/dockerLogsApp.tsx",
+    "src/webview/resultsApp.tsx",
+    "src/webview/sshExplorerApp.tsx",
+    "src/webview/infoPanelApp.tsx"
+  ],
+  outdir: "media",
+  entryNames: "[name]",
+  loader: {
+    ".ts": "ts",
+    ".tsx": "tsx"
+  }
+};
+
 if (watch) {
-  const ctx = await esbuild.context(buildOptions);
-  await ctx.watch();
-  await esbuild.build(buildOptions);
+  const extensionCtx = await esbuild.context(extensionBuildOptions);
+  const webviewCtx = await esbuild.context(webviewBuildOptions);
+  await extensionCtx.watch();
+  await webviewCtx.watch();
+  await esbuild.build(extensionBuildOptions);
+  await esbuild.build(webviewBuildOptions);
   console.log("Watching: extension (src/extension.ts → dist/extension.js)");
+  console.log("Watching: webviews (src/webview/*.tsx → media/*.js)");
 } else {
-  await esbuild.build(buildOptions);
+  await esbuild.build(extensionBuildOptions);
+  await esbuild.build(webviewBuildOptions);
   console.log("Built.");
 }

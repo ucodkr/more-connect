@@ -3,9 +3,10 @@
     "module": "commonjs",
     "target": "ES2021",
     "outDir": "dist",
-    "lib": ["ES2021"],
+    "lib": ["ES2021", "DOM"],
     "sourceMap": true,
     "rootDir": "src",
+    "jsx": "react-jsx",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true

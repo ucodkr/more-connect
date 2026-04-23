@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import type { ConnectionConfig, QueryResult } from "../types";
+import { renderWebviewAppHtml } from "./webviewAppShell";
 
 export class ResultsPanel {
   private panel: vscode.WebviewPanel | undefined;
@@ -31,7 +32,7 @@ export class ResultsPanel {
     }
 
     this.panel.title = `Results: ${connection.name}`;
-    this.panel.webview.html = renderHtml(connection, sql, result);
+    this.panel.webview.html = renderHtml(this.panel.webview, this.ctx.extensionUri, connection, sql, result);
   }
 
   public postMessage(message: any): void {
@@ -41,16 +42,13 @@ export class ResultsPanel {
   }
 }
 
-function escapeHtml(s: string): string {
-  return s
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function renderHtml(connection: ConnectionConfig, sql: string, result: QueryResult): string {
+function renderHtml(
+  webview: vscode.Webview,
+  extensionUri: vscode.Uri,
+  connection: ConnectionConfig,
+  sql: string,
+  result: QueryResult
+): string {
   const maxRows = 200;
   const rows = result.rows.slice(0, maxRows);
   const columns = result.columns.length ? result.columns : inferColumns(rows);
@@ -59,152 +57,29 @@ function renderHtml(connection: ConnectionConfig, sql: string, result: QueryResu
   const editable = connection.type === "oracle" && Boolean(rowIdColumn) && Boolean(parseSingleFromTable(sql));
   const fromTable = parseSingleFromTable(sql);
 
-  const headerCells = columns.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
-  const bodyRows = rows
-    .map((r, rowIndex) => {
-      const tds = columns
-        .map((c, colIndex) => {
-          const v = r[c];
-          const text =
-            v === null || v === undefined
-              ? ""
-              : typeof v === "object"
-                ? JSON.stringify(v)
-                : String(v);
-          const baseAttrs = `data-row="${rowIndex}" data-col="${colIndex}" data-colname="${escapeHtml(c)}"`;
-          const rowId = rowIdColumn ? r[rowIdColumn] : undefined;
-          const rowIdAttr = rowId === null || rowId === undefined ? "" : ` data-rowid="${escapeHtml(String(rowId))}"`;
-          const editableAttr =
-            editable && c !== rowIdColumn ? ` contenteditable="true" spellcheck="false"` : "";
-          return `<td ${baseAttrs}${rowIdAttr}${editableAttr} title="${escapeHtml(text)}">${escapeHtml(text)}</td>`;
-        })
-        .join("");
-      return `<tr>${tds}</tr>`;
-    })
-    .join("");
-
-  const subtitle = `${connection.type}@${connection.host}:${connection.port}${connection.database ? `/${connection.database}` : ""}`;
-  const meta = `rows=${result.rowCount ?? result.rows.length}, duration=${result.durationMs}ms`;
-
   const initPayload = {
     connectionId: connection.id,
+    connectionName: connection.name,
+    subtitle: `${connection.type}@${connection.host}:${connection.port}${connection.database ? `/${connection.database}` : ""}`,
+    meta: `rows=${result.rowCount ?? result.rows.length}, duration=${result.durationMs}ms`,
     database: connection.database ?? "",
     dbType: connection.type,
     sql,
     table: fromTable ?? "",
     rowIdColumn: rowIdColumn ?? "",
-    editable
+    editable,
+    resultCount: result.rows.length,
+    maxRows,
+    columns,
+    rows
   };
-
-  return `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <style>
-      :root { color-scheme: light dark; }
-      body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif; padding: 12px; background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); }
-      .meta { opacity: 0.8; margin-bottom: 10px; }
-      textarea { width: 100%; box-sizing: border-box; min-height: 110px; resize: vertical; white-space: pre; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; background: rgba(127,127,127,.12); color: inherit; border: 1px solid rgba(127,127,127,.25); padding: 10px; border-radius: 6px; }
-      table { width: 100%; border-collapse: collapse; }
-      th, td { border-bottom: 1px solid rgba(127,127,127,.35); padding: 6px 8px; vertical-align: top; }
-      th { position: sticky; top: 0; z-index: 2; background: var(--vscode-editor-background); text-align: left; }
-      td { max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
-      .note { margin-top: 10px; opacity: .75; }
-      .actions { display: flex; gap: 8px; align-items: center; margin: 10px 0; }
-      button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
-      button:disabled { opacity: .5; cursor: default; }
-      .status { opacity: .8; }
-      .status.error { color: var(--vscode-errorForeground); opacity: 1; }
-      td[contenteditable="true"] { outline: 1px dashed rgba(127,127,127,.55); outline-offset: -2px; }
-    </style>
-  </head>
-  <body>
-    <div class="meta"><strong>${escapeHtml(connection.name)}</strong> — ${escapeHtml(subtitle)} — ${escapeHtml(meta)}</div>
-    <div class="actions">
-      <button id="runSql">Run</button>
-      <button id="rerunRowid">Re-run (editable)</button>
-      <span class="status" id="status"></span>
-    </div>
-    <textarea id="sql" spellcheck="false">${escapeHtml(sql)}</textarea>
-    <table>
-      <thead><tr>${headerCells}</tr></thead>
-      <tbody>${bodyRows}</tbody>
-    </table>
-    <div class="note">${result.rows.length > maxRows ? `Showing first ${maxRows} rows.` : ""}</div>
-    <script>
-      const vscode = acquireVsCodeApi();
-      const state = ${JSON.stringify(initPayload)};
-      const statusEl = document.getElementById("status");
-      const rerunBtn = document.getElementById("rerunRowid");
-      const runBtn = document.getElementById("runSql");
-      const sqlEl = document.getElementById("sql");
-
-      function setStatus(text) {
-        const t = String(text || "");
-        statusEl.textContent = t;
-        statusEl.classList.toggle("error", /failed|timed out|unknown connection/i.test(t));
-      }
-      function canRerun() { return state.dbType === "oracle"; }
-      rerunBtn.disabled = !canRerun();
-      rerunBtn.title = rerunBtn.disabled ? "Re-run (editable) is only supported for Oracle." : "Re-run query with ROWID for editing.";
-      rerunBtn.addEventListener("click", () => {
-        setStatus("Re-running with ROWID...");
-        vscode.postMessage({
-          type: "results.rerunWithRowid",
-          connectionId: state.connectionId,
-          database: state.database,
-          sql: String(sqlEl.value ?? "")
-        });
-      });
-
-      function runSql() {
-        const sql = String(sqlEl.value ?? "");
-        if (!sql.trim()) return;
-        setStatus("Running...");
-        vscode.postMessage({ type: "results.runSql", connectionId: state.connectionId, database: state.database, sql });
-      }
-      runBtn.addEventListener("click", runSql);
-      sqlEl.addEventListener("keydown", (e) => {
-        // Ctrl+Enter / Cmd+Enter
-        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-          e.preventDefault();
-          runSql();
-        }
-      });
-
-      if (state.editable) {
-        document.addEventListener("blur", async (e) => {
-          const cell = e.target;
-          if (!cell || cell.tagName !== "TD") return;
-          if (!cell.isContentEditable) return;
-          const rowid = cell.getAttribute("data-rowid");
-          const col = cell.getAttribute("data-colname");
-          if (!rowid || !col) return;
-          const value = cell.textContent ?? "";
-          setStatus("Saving...");
-          vscode.postMessage({
-            type: "results.updateCell",
-            connectionId: state.connectionId,
-            database: state.database,
-            table: state.table,
-            rowid,
-            column: col,
-            value
-          });
-        }, true);
-      } else {
-        setStatus(state.rowIdColumn ? "" : "Tip: click Re-run (editable) to enable editing for simple Oracle SELECTs.");
-      }
-
-      window.addEventListener("message", (event) => {
-        const msg = event.data;
-        if (!msg || typeof msg !== "object") return;
-        if (msg.type === "results.status") setStatus(msg.text || "");
-      });
-    </script>
-  </body>
-</html>`;
+  return renderWebviewAppHtml({
+    webview,
+    extensionUri,
+    title: `Results: ${connection.name}`,
+    scriptFile: "resultsApp.js",
+    state: initPayload
+  });
 }
 
 function inferColumns(rows: Array<Record<string, unknown>>): string[] {
