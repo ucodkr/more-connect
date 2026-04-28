@@ -369,8 +369,7 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
         item.description = element.container.state || element.container.image;
         item.tooltip = `${element.container.image}\n${element.container.status}`;
         item.iconPath = new vscode.ThemeIcon("vm");
-        // 선택 시 로그 테일링(실시간 반영)
-        // 선택 시 아무 동작 없음, 로그 아이콘 버튼만 표시
+        // Keep selection passive; expose log viewing through the inline button.
         item.buttons = [
           {
             iconPath: new vscode.ThemeIcon("output"),

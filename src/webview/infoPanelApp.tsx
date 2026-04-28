@@ -34,7 +34,7 @@ function App(): React.JSX.Element {
         {state.showRefreshButton ? (
           <div className="toolbar">
             <button className="button" type="button" onClick={() => vscode.postMessage({ type: "info.refresh" })}>
-              새로고침
+              Refresh
             </button>
           </div>
         ) : null}

@@ -24494,7 +24494,7 @@
     return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("style", { children: styles }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "page", children: [
-        state.showRefreshButton ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "toolbar", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "button", type: "button", onClick: () => vscode.postMessage({ type: "info.refresh" }), children: "\uC0C8\uB85C\uACE0\uCE68" }) }) : null,
+        state.showRefreshButton ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "toolbar", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "button", type: "button", onClick: () => vscode.postMessage({ type: "info.refresh" }), children: "Refresh" }) }) : null,
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "content", dangerouslySetInnerHTML: { __html: state.body } })
       ] })
     ] });

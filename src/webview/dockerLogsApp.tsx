@@ -76,11 +76,11 @@ function App(): React.JSX.Element {
       <style>{styles}</style>
       <div className="page">
         <div className="header">
-          <h2 className="title">컨테이너 로그: {state.containerId}</h2>
+          <h2 className="title">Container Logs: {state.containerId}</h2>
           <input
             className="filterBox"
             type="text"
-            placeholder="필터 (예: error, warn, ...)"
+            placeholder="Filter (e.g. error, warn, ...)"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -96,7 +96,7 @@ function App(): React.JSX.Element {
         >
           <pre
             className="pre"
-            dangerouslySetInnerHTML={{ __html: filteredHtml.length ? filteredHtml.join("\n") : "(로그 없음)" }}
+            dangerouslySetInnerHTML={{ __html: filteredHtml.length ? filteredHtml.join("\n") : "(no logs)" }}
           />
         </div>
       </div>

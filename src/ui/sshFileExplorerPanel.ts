@@ -122,7 +122,7 @@ export class SshFileExplorerPanel {
     }
     if (type === "sshExplorer.up") {
       if (!this.cwd) {
-        this.postStatus("먼저 절대경로를 입력하고 Refresh 하세요.");
+        this.postStatus("Enter an absolute path first, then refresh.");
         this.postDir([]);
         return;
       }
@@ -142,7 +142,7 @@ export class SshFileExplorerPanel {
       const name = String(msg?.name ?? "");
       if (!name) return;
       if (!this.cwd) {
-        this.postStatus("먼저 절대경로를 입력하고 Refresh 하세요.");
+        this.postStatus("Enter an absolute path first, then refresh.");
         this.postDir([]);
         return;
       }
@@ -187,7 +187,7 @@ export class SshFileExplorerPanel {
 
     // Relative: require a known cwd; then join into an absolute path.
     if (!this.cwd) {
-      this.postStatus("상대경로는 사용할 수 없습니다. 먼저 절대경로를 입력하고 Refresh 하세요.");
+      this.postStatus("Relative paths are unavailable until you enter an absolute path and refresh.");
       return;
     }
     return posixNormalize(path.posix.join(this.cwd, trimmed));
@@ -197,10 +197,10 @@ export class SshFileExplorerPanel {
     const base = message.trim() || "SSH failed";
     if (/host key verification failed|known_hosts|are you sure you want to continue connecting/i.test(base)) {
       const target = this.system?.target ?? "";
-      return `${base}\n\n처음 접속이면 터미널에서 한 번 \`ssh ${target}\` 실행 후 호스트키를 등록하세요.`;
+      return `${base}\n\nIf this is your first connection, run \`ssh ${target}\` once in a terminal to register the host key.`;
     }
     if (/permission denied|authentication|batchmode/i.test(base)) {
-      return `${base}\n\n(Non-interactive) SSH 인증이 필요합니다. 키/ssh-agent 설정 후 다시 시도하세요.`;
+      return `${base}\n\n(Non-interactive) SSH authentication is required. Configure your key or ssh-agent, then try again.`;
     }
     return base;
   }

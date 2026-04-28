@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-// npm/yarn 명령을 터미널에서 실행 (컬러, 상태, 경고 등 유지)
+// Run npm/yarn commands in the terminal so colors, status, and warnings are preserved.
 export function runNpmOrYarnInTerminal(command: string, cwd?: string) {
   const terminal = vscode.window.createTerminal({
     name: `npm/yarn: ${command}`,
@@ -7,7 +7,7 @@ export function runNpmOrYarnInTerminal(command: string, cwd?: string) {
   });
   terminal.show(true);
   terminal.sendText(command, true);
-  vscode.window.showInformationMessage(`명령이 터미널에서 실행됩니다: ${command}`);
+  vscode.window.showInformationMessage(`Command is running in the terminal: ${command}`);
 }
 import { createRequire } from "node:module";
 import * as vscode from "vscode";

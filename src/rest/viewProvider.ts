@@ -1240,7 +1240,7 @@ export class RestViewProvider implements vscode.WebviewViewProvider {
         if (!updated) throw new Error("Request not found");
         await this.saveState();
         this.postState();
-        this.post({ type: "toast", kind: "info", message: "이름 변경됨" });
+        this.post({ type: "toast", kind: "info", message: "Name updated" });
         return;
       }
 
@@ -1527,7 +1527,7 @@ export class RestViewProvider implements vscode.WebviewViewProvider {
         if (controller) {
           controller.abort();
           this.inflight.delete(msg.requestId);
-          this.post({ type: "toast", kind: "info", message: "요청이 취소되었습니다." });
+          this.post({ type: "toast", kind: "info", message: "Request cancelled." });
         }
         return;
       }

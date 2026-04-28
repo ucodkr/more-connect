@@ -24529,7 +24529,7 @@
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "page", children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "header", children: [
           /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("h2", { className: "title", children: [
-            "\uCEE8\uD14C\uC774\uB108 \uB85C\uADF8: ",
+            "Container Logs: ",
             state.containerId
           ] }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
@@ -24537,7 +24537,7 @@
             {
               className: "filterBox",
               type: "text",
-              placeholder: "\uD544\uD130 (\uC608: error, warn, ...)",
+              placeholder: "Filter (e.g. error, warn, ...)",
               value: query,
               onChange: (event) => setQuery(event.target.value)
             }
@@ -24557,7 +24557,7 @@
               "pre",
               {
                 className: "pre",
-                dangerouslySetInnerHTML: { __html: filteredHtml.length ? filteredHtml.join("\n") : "(\uB85C\uADF8 \uC5C6\uC74C)" }
+                dangerouslySetInnerHTML: { __html: filteredHtml.length ? filteredHtml.join("\n") : "(no logs)" }
               }
             )
           }

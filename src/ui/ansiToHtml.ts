@@ -1,4 +1,4 @@
-// 외부 라이브러리 기반 ANSI → HTML 변환 (모든 ANSI 지원)
+// ANSI to HTML conversion through the external library.
 import AnsiToHtml from "ansi-to-html";
 import stripAnsi from "strip-ansi";
 
@@ -19,12 +19,12 @@ export function normalizeAnsiDisplayLine(text: string): string {
         .replaceAll(otherControlPattern, "");
 }
 
-// 줄 단위가 아니라 전체 텍스트를 한 번에 변환해야 색상/줄바꿈이 깨지지 않음
+// Convert the full text at once so colors and line breaks remain intact.
 export function ansiToHtml(text: string): string {
     const converter = new AnsiToHtml({
         fg: '#d4d4d4',
         bg: '#1e1e1e',
-        newline: false, // 줄바꿈 직접 처리
+        newline: false, // line breaks are handled separately
         escapeXML: true,
         stream: false
     });
@@ -42,5 +42,5 @@ export function ansiLinesToHtml(lines: string[]): string[] {
     return lines.map((line) => converter.toHtml(normalizeAnsiDisplayLine(line)));
 }
 
-// ANSI 코드 제거 유틸도 export
+// Re-export the ANSI stripping utility.
 export { stripAnsi };

@@ -219,7 +219,7 @@
 
     const visible = out.trim();
     if (inThink || (hasOpenThink && !visible)) {
-      return visible ? visible + "\n\n생각중입니다..." : "생각중입니다...";
+      return visible ? visible + "\n\nThinking..." : "Thinking...";
     }
     return out.trimEnd();
   }
@@ -322,7 +322,7 @@
     statusEl.classList.toggle("error", Boolean(isError));
     statusEl.classList.toggle("typing", Boolean(typing));
     if (typing) {
-      statusEl.innerHTML = '응답 생성 중<span class="dots"><span>.</span><span>.</span><span>.</span></span>';
+      statusEl.innerHTML = 'Generating response<span class="dots"><span>.</span><span>.</span><span>.</span></span>';
       return;
     }
     statusEl.textContent = String(text || "");
@@ -402,7 +402,7 @@
     streamAssistantIndex = -1;
     renderMessages();
     renderModelOptions();
-    setStatus("대화 불러오는 중...");
+    setStatus("Loading conversation...");
     vscode.postMessage({ type: "ollama.switchModel", endpointId: state.endpointId, model: model });
     vscode.postMessage({ type: "ollama.listSessions", endpointId: state.endpointId, model: model });
   });
@@ -410,7 +410,7 @@
     const sessionId = String(sessionSelectEl.value || "").trim();
     if (!sessionId || sessionId === String(state.sessionId || "")) return;
     state.sessionId = sessionId;
-    setStatus("세션 불러오는 중...");
+    setStatus("Loading session...");
     vscode.postMessage({
       type: "ollama.selectSession",
       endpointId: state.endpointId,
@@ -452,7 +452,7 @@
       streamAssistantIndex = -1;
       renderMessages();
       setSending(false);
-      setStatus(msg.stopped ? "중지됨" : "");
+      setStatus(msg.stopped ? "Stopped" : "");
       return;
     }
     if (msg.type === "ollama.error") {
@@ -462,7 +462,7 @@
       }
       streamAssistantIndex = -1;
       setSending(false);
-      setStatus(String(msg.message || "요청 실패"), true);
+      setStatus(String(msg.message || "Request failed"), true);
       return;
     }
     if (msg.type === "ollama.setConversation") {

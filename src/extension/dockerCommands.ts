@@ -18,24 +18,24 @@ type DockerCommandsDeps = {
 };
 
 export function registerDockerCommands(context: vscode.ExtensionContext, deps: DockerCommandsDeps): void {
-  // 실시간 로그 테일링 관리
+  // Manage live log tailing.
   let tailingInterval: NodeJS.Timeout | undefined;
   let panelTailingInterval: NodeJS.Timeout | undefined;
   let lastLogs = "";
-  // 컨테이너 선택 시 로그 테일링(실시간 반영)
+  // Tail logs when a container is selected.
   context.subscriptions.push(
     vscode.commands.registerCommand("moreConnect.tailDockerContainerLogs", async (node?: ExplorerNode) => {
       if (node?.kind !== "dockerContainer") return;
       const host = deps.dockerStore.list().find((item) => item.id === node.hostId);
       if (!host) return;
-      // 로그 출력용 OutputChannel 사용
+      // Use an OutputChannel for log output.
       const channelName = `Docker Logs: ${node.container.name || node.container.id}`;
       let channel = vscode.window.createOutputChannel(channelName);
       channel.show(true);
-      // 기존 테일링 중지
+      // Stop existing tailing.
       if (tailingInterval) clearInterval(tailingInterval);
       lastLogs = "";
-      // 주기적으로 로그 갱신
+      // Refresh logs periodically.
       const fetchLogs = async () => {
         try {
           const logs = await getDockerContainerLogs(host, node.container.id, 2000);
@@ -50,7 +50,7 @@ export function registerDockerCommands(context: vscode.ExtensionContext, deps: D
       };
       await fetchLogs();
       tailingInterval = setInterval(fetchLogs, 2000);
-      // OutputChannel 닫힐 때 polling 중지
+      // Stop polling when the OutputChannel is closed.
       const closeListener = vscode.window.onDidChangeVisibleTextEditors((editors) => {
         if (!editors.some(e => e.document.fileName === channelName)) {
           if (tailingInterval) clearInterval(tailingInterval);
@@ -59,7 +59,7 @@ export function registerDockerCommands(context: vscode.ExtensionContext, deps: D
       });
     })
   );
-  // 로그 패널 인스턴스 (1개만 유지)
+  // Keep one log panel instance.
   const logsPanel = new DockerLogsPanel(context);
   vscode.commands.registerCommand("moreConnect.showDockerContainerLogs", async (node?: ExplorerNode) => {
     if (node?.kind !== "dockerContainer") return;

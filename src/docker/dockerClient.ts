@@ -1,22 +1,22 @@
-// 컨테이너 로그 조회
+// Fetch container logs.
 export async function getDockerContainerLogs(host: DockerHost, containerId: string, tail: number = 2000): Promise<string> {
-  // tail: 최근 N줄만 가져옴 (기본 2000줄)
+  // tail: fetch only the most recent N lines (default 2000).
   const raw = await runDocker(host, ["logs", "--tail", String(tail), containerId, "--timestamps"]);
-  // 로그 라인별로 포맷: 에러/경고/정보 구분, 컬러 강조(ANSI), 시간 표시
+  // Format each log line with timestamp and ANSI colors by severity.
   return raw
     .split(/\r?\n/g)
     .map(line => {
-      // [2026-04-23T12:34:56.789012345Z] 로그내용
+      // [2026-04-23T12:34:56.789012345Z] log content
       const m = line.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\s+(.*)$/);
       if (!m) return line;
       const [, ts, msg] = m;
       let colored = msg;
       if (/error|fail|exception/i.test(msg)) {
-        colored = `\u001b[31m${msg}\u001b[0m`; // 빨강
+        colored = `\u001b[31m${msg}\u001b[0m`; // red
       } else if (/warn|deprecated/i.test(msg)) {
-        colored = `\u001b[33m${msg}\u001b[0m`; // 노랑
+        colored = `\u001b[33m${msg}\u001b[0m`; // yellow
       } else if (/info|started|listening/i.test(msg)) {
-        colored = `\u001b[36m${msg}\u001b[0m`; // 청록
+        colored = `\u001b[36m${msg}\u001b[0m`; // cyan
       }
       return `\u001b[90m${ts}\u001b[0m ${colored}`;
     })
