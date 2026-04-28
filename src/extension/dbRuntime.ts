@@ -49,10 +49,11 @@ export function createDbRuntime(deps: CreateDbRuntimeDeps) {
   }
 
   async function ensurePassword(config: ConnectionConfig): Promise<string | undefined> {
-    if (config.type === "sqlite" || config.type === "redis") return "";
+    if (config.type === "sqlite") return "";
     const key = `moreConnect.password.${config.id}`;
     const existing = await deps.context.secrets.get(key);
     if (existing !== undefined) return existing;
+    if (config.type === "redis") return "";
 
     const password = await vscode.window.showInputBox({
       title: `Password for ${config.name}`,

@@ -40,7 +40,8 @@ export class RedisClient implements DbClient {
     await onceConnected(socket);
 
     if (password) {
-      await this.sendCommand(["AUTH", password]);
+      const user = String(this.config.user ?? "").trim();
+      await this.sendCommand(user ? ["AUTH", user, password] : ["AUTH", password]);
     }
     const db = this.config.database ? Number(this.config.database) : this.config.redisDatabase ?? 0;
     if (typeof db === "number" && Number.isFinite(db) && db !== 0) {
@@ -76,7 +77,19 @@ export class RedisClient implements DbClient {
   }
 
   public async listDatabases(): Promise<string[]> {
-    return Array.from({ length: 16 }, (_, i) => String(i));
+    if (!this.isConnected) throw new Error("Not connected");
+    const dbCount = await this.getConfiguredDatabaseCount();
+    const databases: string[] = [];
+    for (let i = 0; i < dbCount; i++) {
+      await this.sendCommand(["SELECT", String(i)]);
+      const size = await this.sendCommand<number>(["DBSIZE"]);
+      if (Number(size) > 0) databases.push(String(i));
+    }
+    const configured = this.config.database ? Number(this.config.database) : this.config.redisDatabase ?? 0;
+    if (Number.isFinite(configured)) {
+      await this.sendCommand(["SELECT", String(configured)]);
+    }
+    return databases;
   }
 
   public async listTables(database: string): Promise<Array<{ name: string; schema?: string; type?: string }>> {
@@ -116,6 +129,17 @@ export class RedisClient implements DbClient {
       this.pending.push({ resolve, reject });
       this.socket!.write(payload);
     });
+  }
+
+  private async getConfiguredDatabaseCount(): Promise<number> {
+    try {
+      const resp = (await this.sendCommand(["CONFIG", "GET", "databases"])) as any;
+      const value = Array.isArray(resp) ? Number(resp[1]) : NaN;
+      if (Number.isFinite(value) && value > 0) return Math.trunc(value);
+    } catch {
+      // Some managed Redis services disable CONFIG. Use the Redis default.
+    }
+    return 16;
   }
 }
 
@@ -220,7 +244,7 @@ function firstNonEmptyCommand(input: string): string {
 
 function splitArgs(command: string): string[] {
   const args: string[] = [];
-  const re = /"([^"\\]*(?:\\.[^"\\]*)*)"|'([^'\\]*(?:\\.[^'\\]*)*)'|(\\S+)/g;
+  const re = /"([^"\\]*(?:\\.[^"\\]*)*)"|'([^'\\]*(?:\\.[^'\\]*)*)'|(\S+)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(command))) {
     const part = m[1] ?? m[2] ?? m[3] ?? "";

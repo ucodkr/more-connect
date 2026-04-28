@@ -213,12 +213,17 @@ function App(): React.JSX.Element {
             </>
           ) : null}
 
-          {!isSqlite && !isRedis ? (
+          {!isSqlite ? (
             <>
               <div className="row">
                 <label className="label" htmlFor="user">User</label>
                 <input id="user" className="input" value={form.user} onChange={(e) => setField("user", e.target.value)} />
               </div>
+            </>
+          ) : null}
+
+          {!isSqlite && !isRedis ? (
+            <>
               <div className="row">
                 <label className="label" htmlFor="database">Database (optional)</label>
                 <input id="database" className="input" value={form.database} onChange={(e) => setField("database", e.target.value)} />

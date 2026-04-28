@@ -26,6 +26,13 @@ With the database explorer you can:
 - Preview table data
 - Save favorite SQL per connection and database
 
+Redis browser:
+
+- Supports Redis instances with or without authentication
+- Uses saved passwords from VS Code Secret Storage when present
+- Supports Redis ACL authentication with username and password
+- Shows only Redis DB indexes that contain data
+
 Passwords are stored in VS Code Secret Storage.
 
 ## S3 Browser (AWS S3 / MinIO)

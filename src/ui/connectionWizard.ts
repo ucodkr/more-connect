@@ -120,7 +120,7 @@ function parseForm(existing: ConnectionConfig | undefined, payload: any): Wizard
       type,
       host,
       port,
-      user: "",
+      user: String(payload?.user ?? "").trim(),
       database: redisDatabase !== undefined ? String(redisDatabase) : undefined,
       redisDatabase,
       ssl,
