@@ -124,6 +124,7 @@ The extension also supports local and remote LLM endpoints.
 Save frequently used folders and workspace files for quick access.
 
 - Add folders or `.code-workspace` files
+- Add Remote SSH folders with `vscode-remote://ssh-remote+host/path`
 - Open favorites in a new VS Code window
 - Manage saved entries from the sidebar
 

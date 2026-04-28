@@ -91,6 +91,11 @@ function normalizeUserPathInput(input: string): string | undefined {
 }
 
 function buildVsCodeFavoriteName(targetPath: string): string {
+  if (targetPath.startsWith("vscode-remote://")) {
+    const uri = vscode.Uri.parse(targetPath);
+    const base = path.posix.basename(uri.path);
+    return base || uri.authority || targetPath;
+  }
   const base = path.basename(targetPath);
   return base || targetPath;
 }
@@ -98,6 +103,19 @@ function buildVsCodeFavoriteName(targetPath: string): string {
 export async function pathToVsCodeFavorite(rawPath: string): Promise<VsCodeFavorite | undefined> {
   const targetPath = normalizeUserPathInput(rawPath);
   if (!targetPath) return;
+  if (targetPath.startsWith("vscode-remote://")) {
+    const uri = vscode.Uri.parse(targetPath, true);
+    if (uri.scheme === "vscode-remote" && uri.authority.startsWith("ssh-remote+") && uri.path) {
+      return {
+        id: randomUUID(),
+        name: buildVsCodeFavoriteName(targetPath),
+        targetPath: uri.toString(),
+        kind: "remoteSsh"
+      };
+    }
+    vscode.window.showErrorMessage("Invalid Remote SSH URI. Use vscode-remote://ssh-remote+host/path.");
+    return;
+  }
   const targetUri = vscode.Uri.file(targetPath);
   try {
     const stat = await vscode.workspace.fs.stat(targetUri);

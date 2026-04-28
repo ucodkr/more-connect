@@ -204,7 +204,7 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
                     : element.group === "docker"
                       ? "Docker"
                       : element.group === "vscode"
-                        ? "Folder/ Worksapce Favorites"
+                        ? "Folder/Workspace Favorites"
                         : "LLM (Ollama/vLLM)";
         const item = new vscode.TreeItem(
           label,
@@ -459,9 +459,20 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
       case "vscodeFavorite": {
         const item = new vscode.TreeItem(element.favorite.name, vscode.TreeItemCollapsibleState.None);
         item.contextValue = "vscodeFavorite";
-        item.description = element.favorite.kind === "workspace" ? ".code-workspace" : "folder";
+        item.description =
+          element.favorite.kind === "workspace"
+            ? ".code-workspace"
+            : element.favorite.kind === "remoteSsh"
+              ? "Remote SSH"
+              : "folder";
         item.tooltip = element.favorite.targetPath;
-        item.iconPath = new vscode.ThemeIcon(element.favorite.kind === "workspace" ? "file-submodule" : "folder");
+        item.iconPath = new vscode.ThemeIcon(
+          element.favorite.kind === "workspace"
+            ? "file-submodule"
+            : element.favorite.kind === "remoteSsh"
+              ? "remote-explorer"
+              : "folder"
+        );
         return item;
       }
       case "s3Host": {

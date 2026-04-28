@@ -59,7 +59,7 @@ export type VsCodeFavorite = {
   id: string;
   name: string;
   targetPath: string;
-  kind: "folder" | "workspace";
+  kind: "folder" | "workspace" | "remoteSsh";
 };
 
 export type S3Provider = "aws" | "minio" | "s3compatible";
