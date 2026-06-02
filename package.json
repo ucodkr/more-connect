@@ -552,6 +552,16 @@
         "command": "moreConnect.showDockerContainerLogs",
         "title": "More Connect: Show Docker Container Logs",
         "icon": "$(output)"
+      },
+      {
+        "command": "moreConnect.gitPush",
+        "title": "More Connect: Git Push Settings",
+        "icon": "$(repo-push)"
+      },
+      {
+        "command": "moreConnect.gitPull",
+        "title": "More Connect: Git Pull Settings",
+        "icon": "$(repo-pull)"
       }
     ],
     "viewsContainers": {
@@ -600,6 +610,16 @@
         },
         {
           "command": "moreConnect.refreshConnections",
+          "when": "view == moreConnectConnections",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.gitPull",
+          "when": "view == moreConnectConnections",
+          "group": "navigation"
+        },
+        {
+          "command": "moreConnect.gitPush",
           "when": "view == moreConnectConnections",
           "group": "navigation"
         }

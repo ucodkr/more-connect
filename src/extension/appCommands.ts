@@ -1,4 +1,58 @@
 import * as vscode from "vscode";
+import * as cp from "child_process";
+import * as util from "util";
+import * as fs from "fs";
+
+const execAsync = util.promisify(cp.exec);
+
+async function ensureGitInit(folderPath: string, interactive: boolean = false): Promise<boolean> {
+  if (!fs.existsSync(folderPath)) {
+    fs.mkdirSync(folderPath, { recursive: true });
+  }
+
+  // Ignore drivers directory which could contain large binaries
+  const gitignorePath = vscode.Uri.joinPath(vscode.Uri.file(folderPath), ".gitignore").fsPath;
+  if (!fs.existsSync(gitignorePath)) {
+    fs.writeFileSync(gitignorePath, "drivers/\n");
+  }
+
+  const gitDir = vscode.Uri.joinPath(vscode.Uri.file(folderPath), ".git").fsPath;
+  if (!fs.existsSync(gitDir)) {
+    try {
+      await execAsync("git init", { cwd: folderPath });
+      
+      try { await execAsync("git config user.name", { cwd: folderPath }); }
+      catch { await execAsync('git config user.name "More Connect Sync"', { cwd: folderPath }); }
+      try { await execAsync("git config user.email", { cwd: folderPath }); }
+      catch { await execAsync('git config user.email "sync@more-connect.local"', { cwd: folderPath }); }
+
+      if (interactive) {
+        const remoteUrl = await vscode.window.showInputBox({
+          prompt: "Enter Git Remote URL (leave empty for local-only)",
+          ignoreFocusOut: true
+        });
+        if (remoteUrl) {
+          await execAsync(`git remote add origin ${remoteUrl}`, { cwd: folderPath });
+        }
+      }
+      await execAsync(`git branch -M main`, { cwd: folderPath });
+      if (interactive) vscode.window.showInformationMessage("Git repository initialized.");
+    } catch (err: any) {
+      if (interactive) vscode.window.showErrorMessage(`Failed to initialize git: ${err.message}`);
+      return false;
+    }
+  }
+  return true;
+}
+
+async function hasGitRemote(cwd: string): Promise<boolean> {
+  try {
+    const { stdout } = await execAsync("git remote", { cwd });
+    return stdout.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
 import type { ConnectionStore } from "../storage";
 import type { DockerStore } from "../docker/dockerStore";
 import type { OllamaStore } from "../ollama/ollamaStore";
@@ -91,6 +145,72 @@ export function registerAppCommands(context: vscode.ExtensionContext, deps: AppC
         `Connection storage: ${vscode.Uri.joinPath(pick[0], "more-connect-connections.json").fsPath}`
       );
       deps.view.refresh();
+    }),
+    vscode.commands.registerCommand("moreConnect.gitPull", async () => {
+      const storageFolderUri = deps.store.getFolderUri() ?? context.globalStorageUri;
+      if (!storageFolderUri || !storageFolderUri.fsPath) {
+        vscode.window.showErrorMessage("Storage folder is not a local file system folder.");
+        return;
+      }
+      if (!(await ensureGitInit(storageFolderUri.fsPath, true))) return;
+      if (!(await hasGitRemote(storageFolderUri.fsPath))) {
+        vscode.window.showErrorMessage("No Git remote configured. Cannot pull.");
+        return;
+      }
+      try {
+        await execAsync("git pull --rebase --autostash origin main", { cwd: storageFolderUri.fsPath });
+        vscode.window.showInformationMessage("Git pull successful.");
+        deps.view.refresh();
+      } catch (err: any) {
+        vscode.window.showErrorMessage(`Git pull failed: ${err.message}`);
+      }
+    }),
+    vscode.commands.registerCommand("moreConnect.gitPush", async () => {
+      const storageFolderUri = deps.store.getFolderUri() ?? context.globalStorageUri;
+      if (!storageFolderUri || !storageFolderUri.fsPath) {
+        vscode.window.showErrorMessage("Storage folder is not a local file system folder.");
+        return;
+      }
+      if (!(await ensureGitInit(storageFolderUri.fsPath, true))) return;
+      try {
+        await execAsync('git add . && git commit -m "Auto sync from More Connect" || true', { cwd: storageFolderUri.fsPath });
+        if (await hasGitRemote(storageFolderUri.fsPath)) {
+          await execAsync("git push -u origin HEAD", { cwd: storageFolderUri.fsPath });
+          vscode.window.showInformationMessage("Git push successful.");
+        } else {
+          vscode.window.showInformationMessage("Git changes committed locally (no remote configured).");
+        }
+      } catch (err: any) {
+        vscode.window.showErrorMessage(`Git push failed: ${err.message}`);
+      }
     })
   );
+
+  // Background Auto-Sync every 5 minutes
+  const autoSyncIntervalMs = 5 * 60 * 1000;
+  
+  // Also run an initial init on startup
+  setTimeout(async () => {
+    const storageFolderUri = deps.store.getFolderUri() ?? context.globalStorageUri;
+    if (storageFolderUri && storageFolderUri.fsPath) {
+      await ensureGitInit(storageFolderUri.fsPath, false);
+    }
+  }, 3000);
+
+  setInterval(async () => {
+    const storageFolderUri = deps.store.getFolderUri() ?? context.globalStorageUri;
+    if (!storageFolderUri || !storageFolderUri.fsPath) return;
+    try {
+      const gitDir = vscode.Uri.joinPath(storageFolderUri, ".git").fsPath;
+      if (fs.existsSync(gitDir)) {
+        await execAsync('git add . && git commit -m "Auto sync" || true', { cwd: storageFolderUri.fsPath });
+        if (await hasGitRemote(storageFolderUri.fsPath)) {
+          await execAsync("git pull --rebase --autostash origin main", { cwd: storageFolderUri.fsPath });
+          await execAsync("git push -u origin HEAD", { cwd: storageFolderUri.fsPath });
+        }
+      }
+    } catch (e) {
+      // Ignore background auto-sync errors (e.g. no remote, or network issues)
+    }
+  }, autoSyncIntervalMs);
 }
