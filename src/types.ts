@@ -27,6 +27,8 @@ export type SshConnection = {
   name: string;
   /** Preferred SSH target (usually Host alias from ~/.ssh/config). */
   target: string;
+  /** Remote folders shown under this connection in the SSH tree. */
+  folders?: string[];
   /** Optional metadata used for display/editing. */
   hostName?: string;
   user?: string;

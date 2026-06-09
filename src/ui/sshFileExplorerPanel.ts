@@ -46,7 +46,7 @@ export class SshFileExplorerPanel {
 
   public constructor(private readonly ctx: vscode.ExtensionContext) { }
 
-  public async open(conn: SshConnection): Promise<void> {
+  public async open(conn: SshConnection, initialPath?: string): Promise<void> {
     this.conn = conn;
     this.system = createSystemSsh(conn);
     this.cwd = undefined;
@@ -83,9 +83,9 @@ export class SshFileExplorerPanel {
     this.panel.webview.html = renderHtml(`SSH Explorer: ${conn.name}`, this.panel.webview, this.ctx.extensionUri);
     this.webviewReady = false;
 
-    // Auto-load home directory using system ssh (non-interactive).
+    // Auto-load the requested directory first; fall back to home when none is provided.
     const timeoutMs = vscode.workspace.getConfiguration().get<number>("moreConnect.connectionTimeoutMs", 15000);
-    await this.refresh(timeoutMs, "~");
+    await this.refresh(timeoutMs, initialPath ?? "~");
   }
 
   private postStatus(text: string): void {

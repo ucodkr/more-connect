@@ -56,6 +56,11 @@ export type ExplorerNode =
     conn: SshConnection;
   }
   | {
+    kind: "sshFolder";
+    connectionId: string;
+    folder: string;
+  }
+  | {
     kind: "webLink";
     link: WebLink;
   }
@@ -313,11 +318,84 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
         return item;
       }
       case "ssh": {
-        const item = new vscode.TreeItem(element.conn.name, vscode.TreeItemCollapsibleState.None);
+        const folders = element.conn.folders ?? [];
+        const item = new vscode.TreeItem(
+          element.conn.name,
+          folders.length > 0 ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None
+        );
         item.contextValue = "sshConnection";
-        item.description = element.conn.hostName ?? "";
-        item.tooltip = element.conn.target;
+        item.description = [element.conn.hostName ?? "", folders.length > 0 ? `${folders.length} folder${folders.length === 1 ? "" : "s"}` : ""]
+          .filter(Boolean)
+          .join(" • ");
+        item.tooltip = [element.conn.target, ...folders.map((folder) => `Folder: ${folder}`)].join("\n");
         item.iconPath = new vscode.ThemeIcon("terminal");
+        item.buttons = [
+          {
+            iconPath: new vscode.ThemeIcon("terminal"),
+            tooltip: "Connect via SSH",
+            command: {
+              command: "moreConnect.openSshTerminal",
+              title: "Connect via SSH",
+              arguments: [element]
+            }
+          },
+          {
+            iconPath: new vscode.ThemeIcon("new-folder"),
+            tooltip: "Add Folder",
+            command: {
+              command: "moreConnect.addSshFolder",
+              title: "Add SSH Folder",
+              arguments: [element]
+            }
+          },
+          {
+            iconPath: new vscode.ThemeIcon("trash"),
+            tooltip: "Remove Connection",
+            command: {
+              command: "moreConnect.removeSshConnection",
+              title: "Remove SSH Connection",
+              arguments: [element]
+            }
+          }
+        ];
+        return item;
+      }
+      case "sshFolder": {
+        const label = element.folder === "/" ? "/" : element.folder.split("/").filter(Boolean).slice(-1)[0] ?? element.folder;
+        const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
+        item.contextValue = "sshFolder";
+        item.description = element.folder;
+        item.tooltip = element.folder;
+        item.iconPath = new vscode.ThemeIcon("folder");
+        item.buttons = [
+          {
+            iconPath: new vscode.ThemeIcon("terminal"),
+            tooltip: "Connect and open folder",
+            command: {
+              command: "moreConnect.openSshTerminal",
+              title: "Open SSH Terminal",
+              arguments: [element]
+            }
+          },
+          {
+            iconPath: new vscode.ThemeIcon("new-folder"),
+            tooltip: "Open in SSH File Explorer",
+            command: {
+              command: "moreConnect.openSshFileExplorer",
+              title: "Open SSH File Explorer",
+              arguments: [element]
+            }
+          },
+          {
+            iconPath: new vscode.ThemeIcon("trash"),
+            tooltip: "Remove Folder",
+            command: {
+              command: "moreConnect.removeSshFolder",
+              title: "Remove SSH Folder",
+              arguments: [element]
+            }
+          }
+        ];
         return item;
       }
       case "webLink": {
@@ -532,6 +610,11 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
 
     if (element.kind === "group" && element.group === "ssh") {
       return this.withEmptyState(this.source.listSshConnections().map((conn) => ({ kind: "ssh", conn })), "No SSH connections");
+    }
+
+    if (element.kind === "ssh") {
+      const folders = element.conn.folders ?? [];
+      return folders.map((folder) => ({ kind: "sshFolder", connectionId: element.conn.id, folder }));
     }
 
     if (element.kind === "group" && element.group === "web") {

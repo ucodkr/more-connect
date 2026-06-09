@@ -50,6 +50,7 @@
     "onCommand:moreConnect.createS3Folder",
     "onCommand:moreConnect.copyS3Link",
     "onCommand:moreConnect.openSshFileExplorer",
+    "onCommand:moreConnect.addSshFolder",
     "onView:moreConnectConnections"
   ],
   "main": "./dist/extension.js",
@@ -152,6 +153,16 @@
         "command": "moreConnect.addSshConnection",
         "title": "More Connect: Add SSH Connection",
         "icon": "$(add)"
+      },
+      {
+        "command": "moreConnect.addSshFolder",
+        "title": "More Connect: Add SSH Folder",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "moreConnect.removeSshFolder",
+        "title": "More Connect: Remove SSH Folder",
+        "icon": "$(trash)"
       },
       {
         "command": "moreConnect.editSshConnection",
@@ -641,6 +652,30 @@
           "group": "inline"
         },
         {
+          "command": "moreConnect.addSshFolder",
+          "when": "view == moreConnectConnections && viewItem == sshConnection",
+          "group": "inline",
+          "icon": "$(new-folder)"
+        },
+        {
+          "command": "moreConnect.openSshTerminal",
+          "when": "view == moreConnectConnections && viewItem == sshFolder",
+          "group": "inline",
+          "icon": "$(terminal)"
+        },
+        {
+          "command": "moreConnect.openSshFileExplorer",
+          "when": "view == moreConnectConnections && viewItem == sshFolder",
+          "group": "inline",
+          "icon": "$(file-directory)"
+        },
+        {
+          "command": "moreConnect.removeSshFolder",
+          "when": "view == moreConnectConnections && viewItem == sshFolder",
+          "group": "inline",
+          "icon": "$(trash)"
+        },
+        {
           "command": "moreConnect.addWebLink",
           "when": "view == moreConnectConnections && viewItem == webGroup",
           "group": "inline"
@@ -956,6 +991,12 @@
           "when": "view == moreConnectConnections && viewItem == sshConnection",
           "group": "inline",
           "title": "Explorer"
+        },
+        {
+          "command": "moreConnect.addSshFolder",
+          "when": "view == moreConnectConnections && viewItem == sshConnection",
+          "group": "inline",
+          "title": "Add Folder"
         },
         {
           "command": "moreConnect.editSshConnection",

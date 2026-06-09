@@ -14,24 +14,104 @@ type SshCommandsDeps = {
   view: RefreshableView;
 };
 
+function normalizeRemoteFolderPath(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed) return "";
+  if (trimmed === "/" || trimmed === "~") return trimmed;
+  return trimmed.replace(/\/+$/, "");
+}
+
+function shQuote(s: string): string {
+  return `'${s.replaceAll("'", `'"'"'`)}'`;
+}
+
+function buildRemoteLoginCommand(folder: string): string {
+  const normalized = normalizeRemoteFolderPath(folder);
+  if (!normalized) return "exec $SHELL -l";
+  if (normalized === "/") return "cd / && exec $SHELL -l";
+  if (normalized === "~") return "cd ~ && exec $SHELL -l";
+  if (normalized.startsWith("~/")) {
+    const rest = normalized.slice(2);
+    return `cd ~ && cd -- ${shQuote(rest)} && exec $SHELL -l`;
+  }
+  return `cd -- ${shQuote(normalized)} && exec $SHELL -l`;
+}
+
+function updateConnectionFolders(
+  items: Array<import("../types").SshConnection>,
+  connectionId: string,
+  updater: (current: string[]) => string[]
+): Array<import("../types").SshConnection> {
+  return items.map((connection) => {
+    if (connection.id !== connectionId) return connection;
+    const nextFolders = updater([...(connection.folders ?? [])]);
+    return { ...connection, folders: nextFolders };
+  });
+}
+
+function resolveFolderNodeFolder(node?: ExplorerNode): string | undefined {
+  return node?.kind === "sshFolder" ? node.folder : undefined;
+}
+
+function resolveSshConnectionFromNode(
+  sshStore: SshStore,
+  node?: ExplorerNode
+): import("../types").SshConnection | undefined {
+  if (node?.kind === "ssh") return node.conn;
+  if (node?.kind === "sshFolder") {
+    return sshStore.list().find((connection) => connection.id === node.connectionId);
+  }
+  return undefined;
+}
+
 export function registerSshCommands(context: vscode.ExtensionContext, deps: SshCommandsDeps): void {
   const sshExplorer = new SshFileExplorerPanel(context);
   context.subscriptions.push(
     vscode.commands.registerCommand("moreConnect.openSshTerminal", async (node?: ExplorerNode) => {
-      const conn = node?.kind === "ssh" ? node.conn : undefined;
+      const conn = resolveSshConnectionFromNode(deps.sshStore, node);
       if (!conn) return;
+      const folder = node?.kind === "sshFolder" ? node.folder : "";
       const term = vscode.window.createTerminal({
-        name: `SSH: ${conn.name}`,
+        name: folder ? `SSH: ${conn.name} (${folder})` : `SSH: ${conn.name}`,
         location: { viewColumn: vscode.ViewColumn.Active }
       });
       term.show(false);
-      term.sendText(`ssh ${conn.target}`, true);
+      term.sendText(folder ? `ssh -tt ${shQuote(conn.target)} ${shQuote(buildRemoteLoginCommand(folder))}` : `ssh -tt ${shQuote(conn.target)}`, true);
     }),
 
     vscode.commands.registerCommand("moreConnect.openSshFileExplorer", async (node?: ExplorerNode) => {
-      const conn = node?.kind === "ssh" ? node.conn : undefined;
+      const conn = resolveSshConnectionFromNode(deps.sshStore, node);
       if (!conn) return;
-      await sshExplorer.open(conn);
+      const initialPath = resolveFolderNodeFolder(node);
+      await sshExplorer.open(conn, initialPath);
+    }),
+
+    vscode.commands.registerCommand("moreConnect.addSshFolder", async (node?: ExplorerNode) => {
+      const conn = resolveSshConnectionFromNode(deps.sshStore, node);
+      if (!conn) return;
+      const folder = await vscode.window.showInputBox({
+        title: `Add folder to ${conn.name}`,
+        prompt: "Remote folder path (e.g. /var/www, ~/projects/my-app)",
+        value: conn.folders?.[0] ?? "/",
+        ignoreFocusOut: true
+      });
+      if (folder === undefined) return;
+      const normalized = normalizeRemoteFolderPath(folder);
+      if (!normalized) return;
+      const next = updateConnectionFolders(deps.sshStore.list(), conn.id, (folders) => {
+        if (!folders.includes(normalized)) folders.push(normalized);
+        return folders.sort((a, b) => a.localeCompare(b));
+      });
+      await deps.sshStore.saveAll(next);
+      deps.view.refresh();
+    }),
+
+    vscode.commands.registerCommand("moreConnect.removeSshFolder", async (node?: ExplorerNode) => {
+      const folder = resolveFolderNodeFolder(node);
+      if (!folder || node?.kind !== "sshFolder") return;
+      const next = updateConnectionFolders(deps.sshStore.list(), node.connectionId, (folders) => folders.filter((item) => item !== folder));
+      await deps.sshStore.saveAll(next);
+      deps.view.refresh();
     }),
 
     vscode.commands.registerCommand("moreConnect.importSshConfig", async () => {
@@ -74,7 +154,7 @@ export function registerSshCommands(context: vscode.ExtensionContext, deps: SshC
         ignoreFocusOut: true
       });
       if (!name?.trim()) return;
-      const next = [...deps.sshStore.list(), { id: randomUUID(), name: name.trim(), target: target.trim() }];
+      const next = [...deps.sshStore.list(), { id: randomUUID(), name: name.trim(), target: target.trim(), folders: [] }];
       await deps.sshStore.saveAll(next);
       deps.view.refresh();
     }),
@@ -99,7 +179,7 @@ export function registerSshCommands(context: vscode.ExtensionContext, deps: SshC
       });
       if (name === undefined) return;
 
-      const updated = { ...conn, name: name.trim() || conn.name, target: target.trim() || conn.target };
+      const updated = { ...conn, name: name.trim() || conn.name, target: target.trim() || conn.target, folders: conn.folders ?? [] };
       await deps.sshStore.saveAll(deps.sshStore.list().map((connection) => (connection.id === conn.id ? updated : connection)));
       deps.view.refresh();
     }),
