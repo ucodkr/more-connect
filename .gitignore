@@ -5,3 +5,4 @@ dist
 .DS_Store
 media/connectionWizardApp.js
 media/connectionWizardApp.js.map
+graphify-out
