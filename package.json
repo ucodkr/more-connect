@@ -50,6 +50,7 @@
     "onCommand:moreConnect.createS3Folder",
     "onCommand:moreConnect.copyS3Link",
     "onCommand:moreConnect.openSshFileExplorer",
+    "onCommand:moreConnect.openSshFolderInVsCode",
     "onCommand:moreConnect.addSshFolder",
     "onView:moreConnectConnections"
   ],
@@ -163,6 +164,11 @@
         "command": "moreConnect.removeSshFolder",
         "title": "More Connect: Remove SSH Folder",
         "icon": "$(trash)"
+      },
+      {
+        "command": "moreConnect.openSshFolderInVsCode",
+        "title": "More Connect: Open SSH Folder in VSCode",
+        "icon": "$(remote-explorer)"
       },
       {
         "command": "moreConnect.editSshConnection",
@@ -674,6 +680,12 @@
           "when": "view == moreConnectConnections && viewItem == sshFolder",
           "group": "inline",
           "icon": "$(trash)"
+        },
+        {
+          "command": "moreConnect.openSshFolderInVsCode",
+          "when": "view == moreConnectConnections && viewItem == sshFolder",
+          "group": "inline",
+          "icon": "$(remote-explorer)"
         },
         {
           "command": "moreConnect.addWebLink",

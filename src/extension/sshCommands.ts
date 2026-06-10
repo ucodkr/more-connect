@@ -114,6 +114,23 @@ export function registerSshCommands(context: vscode.ExtensionContext, deps: SshC
       deps.view.refresh();
     }),
 
+    vscode.commands.registerCommand("moreConnect.openSshFolderInVsCode", async (node?: ExplorerNode) => {
+      const conn = resolveSshConnectionFromNode(deps.sshStore, node);
+      if (!conn) return;
+      const folder = resolveFolderNodeFolder(node);
+      if (!folder) return;
+      const normalizedPath = folder.startsWith("/") ? folder : `/${folder}`;
+      const uri = vscode.Uri.from({
+        scheme: "vscode-remote",
+        authority: `ssh-remote+${conn.target}`,
+        path: normalizedPath
+      });
+      await vscode.commands.executeCommand("vscode.openFolder", uri, {
+        forceNewWindow: true,
+        forceReuseWindow: false
+      });
+    }),
+
     vscode.commands.registerCommand("moreConnect.importSshConfig", async () => {
       const text = await readUserSshConfigText();
       if (!text.trim()) {

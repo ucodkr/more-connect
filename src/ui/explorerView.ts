@@ -366,8 +366,17 @@ export class ExplorerView implements vscode.TreeDataProvider<ExplorerNode> {
         item.contextValue = "sshFolder";
         item.description = element.folder;
         item.tooltip = element.folder;
-        item.iconPath = new vscode.ThemeIcon("folder");
+        item.iconPath = new vscode.ThemeIcon("server");
         item.buttons = [
+          {
+            iconPath: new vscode.ThemeIcon("remote-explorer"),
+            tooltip: "Open in VSCode",
+            command: {
+              command: "moreConnect.openSshFolderInVsCode",
+              title: "Open in VSCode",
+              arguments: [element]
+            }
+          },
           {
             iconPath: new vscode.ThemeIcon("terminal"),
             tooltip: "Connect and open folder",
