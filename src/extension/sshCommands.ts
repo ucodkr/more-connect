@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import { parseSshConfig, readUserSshConfigText, sshConnectionsFromConfig } from "../ssh/sshConfig";
 import type { SshStore } from "../ssh/sshStore";
+import { createSystemSsh } from "../ssh/systemSsh";
 import type { ExplorerNode } from "../ui/explorerView";
 import { SshFileExplorerPanel } from "../ui/sshFileExplorerPanel";
 
@@ -35,6 +36,26 @@ function buildRemoteLoginCommand(folder: string): string {
     return `cd ~ && cd -- ${shQuote(rest)} && exec $SHELL -l`;
   }
   return `cd -- ${shQuote(normalized)} && exec $SHELL -l`;
+}
+
+function buildRemotePwdCommand(folder: string): string {
+  const normalized = normalizeRemoteFolderPath(folder);
+  if (!normalized || normalized === "~") return "cd ~ && pwd -P";
+  if (normalized === "/") return "cd / && pwd -P";
+  if (normalized.startsWith("~/")) {
+    const rest = normalized.slice(2);
+    return `cd ~ && cd -- ${shQuote(rest)} && pwd -P`;
+  }
+  return `cd -- ${shQuote(normalized)} && pwd -P`;
+}
+
+async function resolveRemoteFolderPath(conn: import("../types").SshConnection, folder: string, timeoutMs: number): Promise<string> {
+  const system = createSystemSsh(conn);
+  const res = await system.execSh(buildRemotePwdCommand(folder), timeoutMs);
+  if (res.code !== 0) throw new Error((res.stderr || res.stdout || "Failed to resolve remote folder").trim());
+  const resolved = (res.stdout ?? "").split(/\r?\n/).find((line) => line.trim())?.trim() ?? "";
+  if (!resolved.startsWith("/")) throw new Error(`Remote folder did not resolve to an absolute path: ${folder}`);
+  return resolved;
 }
 
 function updateConnectionFolders(
@@ -119,7 +140,8 @@ export function registerSshCommands(context: vscode.ExtensionContext, deps: SshC
       if (!conn) return;
       const folder = resolveFolderNodeFolder(node);
       if (!folder) return;
-      const normalizedPath = folder.startsWith("/") ? folder : `/${folder}`;
+      const timeoutMs = vscode.workspace.getConfiguration().get<number>("moreConnect.connectionTimeoutMs", 15000);
+      const normalizedPath = await resolveRemoteFolderPath(conn, folder, timeoutMs);
       const uri = vscode.Uri.from({
         scheme: "vscode-remote",
         authority: `ssh-remote+${conn.target}`,
