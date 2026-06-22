@@ -2,7 +2,7 @@
   "name": "more-connect",
   "displayName": "More Connect",
   "description": "More Connect is a VS Code extension for working with databases, servers, REST APIs, Docker hosts, web links, and local development tools from one sidebar",
-  "version": "0.1.34",
+  "version": "0.1.35",
   "publisher": "ucodkr",
   "engines": {
     "vscode": "^1.85.0"
