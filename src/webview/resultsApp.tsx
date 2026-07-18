@@ -35,9 +35,9 @@ const styles = `
   .status { opacity: .8; }
   .status.error { color: var(--vscode-errorForeground); opacity: 1; }
   .sql { width: 100%; min-height: 110px; resize: vertical; padding: 10px; border-radius: 6px; border: 1px solid rgba(127,127,127,.25); background: rgba(127,127,127,.12); color: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-  .tableWrap { overflow: auto; margin-top: 10px; }
-  .table { width: 100%; border-collapse: collapse; }
-  .table th, .table td { border-bottom: 1px solid rgba(127,127,127,.35); padding: 6px 8px; vertical-align: top; text-align: left; }
+  .tableWrap { width: 100%; overflow-x: auto; margin-top: 10px; }
+  .table { width: max-content; min-width: 100%; border-collapse: collapse; }
+  .table th, .table td { border-bottom: 1px solid rgba(127,127,127,.35); padding: 6px 8px; vertical-align: top; text-align: left; white-space: nowrap; }
   .table th { position: sticky; top: 0; z-index: 2; background: var(--vscode-editor-background); }
   .cell { max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
   .editable { outline: 1px dashed rgba(127,127,127,.55); outline-offset: -2px; }

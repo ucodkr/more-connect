@@ -12,7 +12,8 @@ export function readState<T>(): T {
   if (!encoded) {
     throw new Error("Missing webview state.");
   }
-  return JSON.parse(atob(encoded)) as T;
+  const bytes = Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0));
+  return JSON.parse(new TextDecoder().decode(bytes)) as T;
 }
 
 export function escapeHtml(s: string): string {
